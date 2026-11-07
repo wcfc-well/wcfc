@@ -78,6 +78,7 @@
   const itemName = (i) => i.type + (i.bank ? `（${i.bank}）` : '') + (i.person ? `（${i.person}）` : '') + (i.memo ? `（${i.memo}）` : '') + (i.paid_by ? `（${i.paid_by}垫付）` : '');
   // 介绍费写介绍人名字；维护费写备注（例如请吃饭）
   const EXTRA_FIELD = { '房东介绍费': 'person', '客户介绍费': 'person', '房东维护费': 'memo', '客户维护费': 'memo' };
+  const MULTI = ['客户维护费', '房东维护费'];
   const reimbHTML = (r) => r.reimbTotal ? `<div class="bd-group"><span class="bd-title">业务员垫付的钱（结算时还给 TA）</span>
         ${Object.entries(r.reimb).map(([n, v]) => `<span>${esc(n)}</span><span class="num">+${f(v)}</span>`).join('')}
         <span class="sub" style="grid-column:1/-1">这笔钱上面已经算在支出里扣掉了，所以结算时单独加给垫付的人。</span></div>` : '';
@@ -229,7 +230,21 @@
     const p = deal ? progress(deal) : null;
     const names = state.agents.filter((a) => a.active || d.listing_agents.includes(a.name) || d.client_agents.includes(a.name)).map((a) => a.name);
     const dis = locked ? 'disabled' : '';
+    // 维护费可以有好几个人垫钱：一行一个人（垫付人 + 备注 + 金额），点“＋”再加一行
+    const payOpts = (sel) => `<option value="">已付清</option>${names.concat(sel && !names.includes(sel) ? [sel] : []).map((n) => `<option value="${esc(n)}" ${sel === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}`;
+    const mline = (t, it, on) => `<div class="mline" data-m="${t}">
+        <select class="paid" data-mpaid ${on ? '' : 'disabled'} aria-label="谁垫付的">${payOpts(it && it.paid_by)}</select>
+        <input class="person" data-mmemo value="${esc(it ? it.memo || it.person || '' : '')}" placeholder="备注" ${on ? '' : 'disabled'} aria-label="备注">
+        <input type="text" class="amt" data-mamt inputmode="decimal" autocomplete="off" value="${it ? it.amount : ''}" placeholder="0" ${on ? '' : 'disabled'} aria-label="金额">
+        <button type="button" class="mdel" ${on ? '' : 'disabled'} aria-label="删掉这一行">×</button></div>`;
+    const multiRow = (t) => {
+      const its = d.expenses.filter((x) => x.type === t), on = its.length > 0 && !locked;
+      return `<div class="money-row multi"><label><input type="checkbox" data-kind="expenses" data-t="${t}" data-multi="1" ${its.length ? 'checked' : ''} ${dis}>${t}</label>
+        <div class="mlines" data-ml="${t}" ${its.length ? '' : 'hidden'}><div class="mline mhead small muted"><span>谁垫的钱</span><span>备注</span><span style="text-align:right">金额</span><span></span></div>${(its.length ? its : [null]).map((it) => mline(t, it, on)).join('')}
+        <button type="button" class="madd" data-madd="${t}" ${on ? '' : 'disabled'}>＋ 再加一个人</button></div></div>`;
+    };
     const moneyRows = (kind, types) => types.map((t) => {
+      if (kind === 'expenses' && MULTI.includes(t)) return multiRow(t);
       const it = d[kind].find((x) => x.type === t);
       const bank = t === '银行返点' ? `<input class="bank" data-bank="1" value="${esc(it && it.bank || '')}" placeholder="哪家银行，例如：农行" ${it && !locked ? '' : 'disabled'} aria-label="哪家银行" style="grid-column:1/-1">` : '';
       const ex = kind === 'expenses' && EXTRA_FIELD[t];
@@ -238,7 +253,7 @@
       const extra = ex ? `<input class="person" data-x2="${t}" value="${esc(xv)}" placeholder="${ex === 'person' ? '介绍人名字' : '备注'}" ${it && !locked ? '' : 'disabled'} aria-label="${t}的${ex === 'person' ? '介绍人' : '备注'}">` : '';
       const payers = names.concat(it && it.paid_by && !names.includes(it.paid_by) ? [it.paid_by] : []);
       const paid = kind === 'expenses' ? `<select class="paid" data-paid="${t}" ${it && !locked ? '' : 'disabled'} ${it ? '' : 'hidden'} aria-label="${t}是谁付的" style="grid-column:1/-1">
-          <option value="">这笔钱已经付清了</option>${payers.map((n) => `<option value="${esc(n)}" ${it && it.paid_by === n ? 'selected' : ''}>${esc(n)}先垫付的，结算时还给 TA</option>`).join('')}</select>` : '';
+          <option value="">已付清</option>${payers.map((n) => `<option value="${esc(n)}" ${it && it.paid_by === n ? 'selected' : ''}>${esc(n)}垫付</option>`).join('')}</select>` : '';
       return `<div class="money-row${ex ? ' with-person' : ''}"><label><input type="checkbox" data-kind="${kind}" data-t="${t}" ${it ? 'checked' : ''} ${dis}>${t}</label>${extra}
         <input type="text" class="amt" inputmode="decimal" autocomplete="off" data-kind="${kind}" data-t="${t}" value="${it ? it.amount : ''}" placeholder="0" ${it && !locked ? '' : 'disabled'} aria-label="${t}金额">${bank}${paid}</div>`;
     }).join('');
@@ -268,7 +283,7 @@
         </div>
         <div class="card"><h3>收入（勾选这一单有的）</h3><div id="income-rows"></div></div>
         <div class="card"><h3>这一单的支出</h3><div id="expense-rows"></div>
-          <div class="small muted" style="margin-top:6px">介绍费写介绍人名字，维护费写备注（例如请吃饭）。勾选后下面可以选“谁先垫付的”：业务员自己先掏钱、店里还没还的，选那个人，结算时这笔钱会加到 TA 的钱里。</div></div>
+          <div class="small muted" style="margin-top:6px">介绍费写介绍人名字。维护费一行一个人：选谁垫的钱、写备注（例如请吃饭）和金额，好几个人垫钱就点“＋ 再加一个人”。选了名字的，结算时这笔钱会还给这个人；没人垫就选“已付清”。</div></div>
         <div class="card stack" id="listing-box"><h3>房源方业务员（可多选）</h3><div class="chips">${chips('listing_agents')}</div></div>
         <div class="card stack"><h3>客户方业务员（可多选）</h3><div class="chips">${chips('client_agents')}</div></div>
         <label class="field">备注<textarea id="f-note" rows="2" ${dis}>${esc(d.note)}</textarea></label>
@@ -287,7 +302,16 @@
       d.deal_date = $('#f-date', sheet).value; d.title = $('#f-title', sheet).value.trim(); d.note = $('#f-note', sheet).value.trim();
       d.owner_name = d.type === '新房' ? '' : $('#f-owner', sheet).value.trim(); d.customer_name = $('#f-cust', sheet).value.trim();
       ['incomes', 'expenses'].forEach((k) => {
-        d[k] = [...sheet.querySelectorAll(`input[type=checkbox][data-kind=${k}]`)].filter((c) => c.checked).map((c) => {
+        d[k] = [...sheet.querySelectorAll(`input[type=checkbox][data-kind=${k}]`)].filter((c) => c.checked).flatMap((c) => {
+          if (c.dataset.multi) {
+            const its = [...sheet.querySelectorAll(`.mline[data-m="${c.dataset.t}"]`)].map((ln) => {
+              const it = { type: c.dataset.t, amount: Number(ln.querySelector('[data-mamt]').value || 0) };
+              const m = ln.querySelector('[data-mmemo]').value.trim(); if (m) it.memo = m;
+              const pb = ln.querySelector('[data-mpaid]').value; if (pb) it.paid_by = pb;
+              return it;
+            }).filter((it, i, arr) => it.amount || it.memo || it.paid_by || arr.length === 1);
+            return its.length ? its : [{ type: c.dataset.t, amount: 0 }];
+          }
           const v = sheet.querySelector(`input.amt[data-kind=${k}][data-t="${c.dataset.t}"]`).value;
           const it = { type: c.dataset.t, amount: Number(v || 0) };
           const b = c.dataset.t === '银行返点' && sheet.querySelector('input[data-bank]');
@@ -316,6 +340,13 @@
     sheet.addEventListener('change', (e) => {
       if (e.target.type === 'checkbox') {
         const on = e.target.checked, t = e.target.dataset.t, k = e.target.dataset.kind;
+        if (e.target.dataset.multi) {
+          const box = sheet.querySelector(`.mlines[data-ml="${t}"]`); box.hidden = !on;
+          if (!on) { box.querySelectorAll('.mline[data-m]').forEach((ln, i) => { if (i) ln.remove(); }); box.querySelectorAll('input').forEach((x) => { x.value = ''; }); box.querySelectorAll('select').forEach((x) => { x.value = ''; }); }
+          box.querySelectorAll('input,select,button').forEach((x) => { x.disabled = !on; });
+          if (on) box.querySelector('[data-mamt]').focus();
+          preview(); return;
+        }
         const a = sheet.querySelector(`input.amt[data-kind=${k}][data-t="${t}"]`); a.disabled = !on; if (on) a.focus(); else a.value = '';
         if (k === 'expenses') {
           const xi = sheet.querySelector(`input[data-x2="${t}"]`); if (xi) { xi.disabled = !on; if (!on) xi.value = ''; }
@@ -324,6 +355,11 @@
         if (t === '银行返点') { const bk = sheet.querySelector('input[data-bank]'); bk.disabled = !on; if (!on) bk.value = ''; }
       }
       preview();
+    });
+    sheet.addEventListener('click', (e) => {
+      const add = e.target.closest('[data-madd]'), del = e.target.closest('.mdel');
+      if (add) { add.insertAdjacentHTML('beforebegin', mline(add.dataset.madd, null, true)); add.previousElementSibling.querySelector('[data-mpaid]').focus(); preview(); }
+      if (del) { const ln = del.closest('.mline'); if (ln.parentNode.querySelectorAll('.mline[data-m]').length > 1) ln.remove(); else { ln.querySelectorAll('input').forEach((x) => { x.value = ''; }); ln.querySelector('select').value = ''; } preview(); }
     });
     sheet.querySelectorAll('.seg button').forEach((b) => b.onclick = () => {
       collect(); d.type = b.dataset.type;

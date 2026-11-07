@@ -234,3 +234,12 @@ details.dd[open] .dd-hint::before{content:"收起 ▴"}
 .img-box img{width:100%;min-height:0;flex:1;object-fit:contain;overflow:auto;border:1px solid var(--line)}
 @media print{.img-ov{display:none!important}}
 .capturing .wrap > .card:not(.no-print){width:760px;max-width:none}.capturing .tablewrap{overflow:visible}
+
+.money-row.multi{grid-template-columns:1fr}
+.mlines{display:flex;flex-direction:column;gap:8px;padding-left:32px}
+.mline{display:grid;grid-template-columns:7.5em minmax(0,1fr) 96px 36px;gap:8px;align-items:center}
+.mline select,.mline input{min-width:0}
+.mline .amt{text-align:right;font-family:var(--font-num)}
+.mline .mdel{min-width:0;padding:0;width:36px;color:var(--muted)}
+.madd{align-self:flex-start}
+@media (max-width:420px){.mlines{padding-left:0}.mline{grid-template-columns:6.5em minmax(0,1fr) 80px 32px;gap:6px}.mline .mdel{width:32px}}
