@@ -648,7 +648,7 @@
       </div>
       <h2>业务员名单（${state.agents.filter((a) => a.active).length} 人）</h2>
       <div class="row" style="flex-wrap:nowrap"><input id="new-name" class="grow" style="min-width:0" placeholder="新来的业务员名字" aria-label="新来的业务员名字"><input id="new-ph" inputmode="numeric" maxlength="4" style="width:6.5em" placeholder="手机后4位" aria-label="手机号后 4 位"><button id="add-agent">添加</button></div>
-      <div class="small muted">点名字看她的每一单，手机号、重置登记、停用也在里面。</div>
+      <div class="small muted">点名字看这个人的每一单，手机号、重置登记、停用也在里面。</div>
       <div class="card agent-list">${rows}</div>
       <div class="row">
         ${S.mode === 'demo' ? '<button id="demo-reset">恢复演示数据</button><a class="btn" href="confirm.html">打开业务员确认页（演示）</a>' : '<button id="logout">退出登录</button>'}
@@ -734,7 +734,7 @@
       if (v && !/^\d{4}$/.test(v)) return toast('请填 4 位数字');
       await run(() => S.saveAgent({ ...a, phone4: v })); await again('已保存');
     };
-    if ($('#a-reset', sheet)) $('#a-reset', sheet).onclick = async () => { await run(() => S.resetBinding(a.id)); await again('已重置，她可以重新登记了'); };
+    if ($('#a-reset', sheet)) $('#a-reset', sheet).onclick = async () => { await run(() => S.resetBinding(a.id)); await again('已重置，可以重新登记了'); };
     if ($('#a-active', sheet)) $('#a-active', sheet).onclick = async () => { await run(() => S.saveAgent({ ...a, active: !a.active })); await again(a.active ? '已停用' : '已恢复'); };
   }
 
