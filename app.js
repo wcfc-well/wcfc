@@ -125,43 +125,80 @@
 
   // ---------- 打印 / 存 PDF / 存图片（结算单、店面收入、业务员业绩共用） ----------
   const exportButtons = () => window.NO_PRINT
-    ? '<div class="notice small">这是网页预览版，不能打印或保存。正式版这里有“打印”“存成 PDF”“存成图片”三个按钮。</div>'
-    : `<div class="export-bar"><button data-x="print">打印</button><button data-x="pdf">存成 PDF</button><button class="btn-primary" data-x="img">存成图片</button></div>`;
+    ? '<div class="notice small">这是网页预览版，不能打印或保存。正式版这里有“打印”“下载 PDF”“下载图片”三个按钮。</div>'
+    : `<div class="export-bar"><button data-x="print">打印</button><button data-x="pdf">下载 PDF</button><button class="btn-primary" data-x="img">下载图片</button></div>`;
   function openAll(sheet) { sheet.querySelectorAll('details').forEach((x) => { x.open = true; }); }
   let h2cLoading = null;
   const loadH2C = () => window.html2canvas ? Promise.resolve() : (h2cLoading = h2cLoading || new Promise((ok, bad) => {
     const sc = document.createElement('script'); sc.src = 'vendor/html2canvas.min.js'; sc.onload = ok; sc.onerror = () => { h2cLoading = null; bad(new Error('加载失败，请检查网络')); }; document.head.appendChild(sc);
   }));
+  let pdfLoading = null;
+  const loadPDF = () => window.jspdf ? Promise.resolve() : (pdfLoading = pdfLoading || new Promise((ok, bad) => {
+    const sc = document.createElement('script'); sc.src = 'vendor/jspdf.umd.min.js'; sc.onload = ok; sc.onerror = () => { pdfLoading = null; bad(new Error('加载失败，请检查网络')); }; document.head.appendChild(sc);
+  }));
+  const MOBILE = /Android|iPhone|iPad/.test(navigator.userAgent), WECHAT = /MicroMessenger/i.test(navigator.userAgent);
+  const fileName = (name, ext) => `${name || '结算单'}.${ext}`.replace(/[\\/:*?"<>|\s]+/g, '_');
+  // 把结算单拍成一张大图；同时记下可以分页的位置（每一块的底部），PDF 分页时不会把一行字切开
+  async function capture(sheet) {
+    await loadH2C(); openAll(sheet);
+    const card = sheet.querySelector('.wrap > .card:not(.no-print)');
+    sheet.classList.add('capturing'); await new Promise((r) => setTimeout(r, 50));
+    try {
+      const canvas = await window.html2canvas(card, { windowWidth: 820, scale: 2, backgroundColor: '#ffffff', ignoreElements: (el) => el.classList && (el.classList.contains('no-print') || el.classList.contains('dd-hint')) });
+      const top = card.getBoundingClientRect().top, k = canvas.height / card.getBoundingClientRect().height;
+      const breaks = [...card.querySelectorAll('.bd-group, tr, h1, h2, h3, .kv > *, .notice, details, .small, .tiles, .deal-line')]
+        .filter((el) => !el.closest('.no-print')).map((el) => Math.round((el.getBoundingClientRect().bottom - top) * k)).filter((y) => y > 0).sort((a, b) => a - b);
+      return { canvas, breaks };
+    } finally { sheet.classList.remove('capturing'); }
+  }
+  async function deliver(blob, fname, title) {
+    const file = new File([blob], fname, { type: blob.type });
+    if (!WECHAT && MOBILE && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title }); return true; } catch (e) { if (e.name === 'AbortError') return true; }
+    }
+    if (WECHAT) return false;
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 60000); return true;
+  }
+  function busy(btn, fn) {
+    return async () => { const old = btn.textContent; btn.textContent = '正在生成…'; btn.disabled = true;
+      try { await fn(); } catch (e) { toast(e.message || '生成失败'); } finally { btn.textContent = old; btn.disabled = false; } };
+  }
   function bindExport(sheet, name) {
     const b = (x) => sheet.querySelector(`[data-x=${x}]`);
     if (!b('print')) return;
     b('print').onclick = () => { openAll(sheet); window.print(); };
-    b('pdf').onclick = () => { openAll(sheet); toast(/Mac|Win/.test(navigator.platform) ? '打印窗口里，目标打印机选“存储为 PDF”' : '打印窗口里，打印机选“另存为 PDF”'); setTimeout(() => window.print(), 600); };
-    b('img').onclick = async () => {
-      const btn = b('img'); const old = btn.textContent; btn.textContent = '正在生成…'; btn.disabled = true;
-      try {
-        await loadH2C(); openAll(sheet);
-        const card = sheet.querySelector('.wrap > .card:not(.no-print)');
-        sheet.classList.add('capturing'); await new Promise((r) => setTimeout(r, 50));
-        const canvas = await window.html2canvas(card, { windowWidth: 820, scale: 2, backgroundColor: '#ffffff', ignoreElements: (el) => el.classList && (el.classList.contains('no-print') || el.classList.contains('dd-hint')) });
-        sheet.classList.remove('capturing');
-        const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/png'));
-        const fname = `${name || '结算单'}.png`.replace(/[\\/:*?"<>|\s]+/g, '_');
-        const file = new File([blob], fname, { type: 'image/png' });
-        const mobile = /Android|iPhone|iPad/.test(navigator.userAgent), wechat = /MicroMessenger/i.test(navigator.userAgent);
-        if (!wechat && mobile && navigator.canShare && navigator.canShare({ files: [file] })) {
-          try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
-        }
-        // 手机上用 data 地址，微信和 Safari 都能长按保存；电脑上给下载按钮
-        const url = mobile ? canvas.toDataURL('image/png') : URL.createObjectURL(blob);
-        const ov = document.createElement('div'); ov.className = 'img-ov';
-        ov.innerHTML = `<div class="img-box">${mobile ? '<div style="font-size:18px"><b>长按下面的图片</b>，选“保存图片”或“发送给朋友”。</div>' : '<div class="small muted">点下面的“下载图片”。</div>'}
-          <img src="${url}" alt="${esc(name)}"><div class="row" style="gap:8px">${mobile ? '' : `<a class="btn btn-primary grow" href="${url}" download="${esc(fname)}">下载图片</a>`}<button class="grow" data-close>关闭</button></div></div>`;
-        ov.querySelector('[data-close]').onclick = () => { ov.remove(); if (!mobile) URL.revokeObjectURL(url); };
-        document.body.appendChild(ov);
-      } catch (e) { toast(e.message || '生成图片失败'); }
-      finally { sheet.classList.remove('capturing'); btn.textContent = old; btn.disabled = false; }
-    };
+    b('pdf').onclick = busy(b('pdf'), async () => {
+      if (WECHAT) return toast('微信里不能下载 PDF，请点“下载图片”，或者右上角“···”选“在浏览器打开”');
+      const [{ canvas, breaks }] = await Promise.all([capture(sheet), loadPDF()]);
+      const pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
+      const M = 10, W = 210 - 2 * M, H = 297 - 2 * M;           // 页边距 10mm
+      const pageH = Math.floor(canvas.width * H / W);            // 一页能放多高（像素）
+      let y = 0, first = true;
+      while (y < canvas.height - 2) {
+        let end = Math.min(y + pageH, canvas.height);
+        if (end < canvas.height) { const ok = breaks.filter((v) => v > y + pageH * 0.5 && v <= end); if (ok.length) end = ok[ok.length - 1]; }
+        const part = document.createElement('canvas'); part.width = canvas.width; part.height = end - y;
+        part.getContext('2d').drawImage(canvas, 0, y, canvas.width, end - y, 0, 0, canvas.width, end - y);
+        if (!first) pdf.addPage(); first = false;
+        pdf.addImage(part.toDataURL('image/jpeg', 0.92), 'JPEG', M, M, W, (end - y) * W / canvas.width);
+        y = end;
+      }
+      await deliver(pdf.output('blob'), fileName(name, 'pdf'), name);
+    });
+    b('img').onclick = busy(b('img'), async () => {
+      const { canvas } = await capture(sheet);
+      const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/png'));
+      const fname = fileName(name, 'png');
+      if (!WECHAT && MOBILE && await deliver(blob, fname, name)) return;
+      if (!MOBILE) { await deliver(blob, fname, name); return toast('图片已下载'); }
+      // 微信里：弹出图片，长按保存
+      const ov = document.createElement('div'); ov.className = 'img-ov';
+      ov.innerHTML = `<div class="img-box"><div style="font-size:18px"><b>长按下面的图片</b>，选“保存图片”或“发送给朋友”。</div>
+        <img src="${canvas.toDataURL('image/png')}" alt="${esc(name)}"><button data-close>关闭</button></div>`;
+      ov.querySelector('[data-close]').onclick = () => ov.remove();
+      document.body.appendChild(ov);
+    });
   }
 
   // ---------- 外框 ----------
@@ -507,7 +544,7 @@
         </table></div></div>
         <h3>包含的单子（都已确认，点开看明细）</h3>
         ${ds.map((d) => dealDetail(d, false, false)).join('')}
-        <button class="btn-primary btn-block" id="stmt">看结算单 / 存成 PDF</button>
+        <button class="btn-primary btn-block" id="stmt">看结算单 / 下载 PDF</button>
         <button class="btn-danger btn-block" id="cancel-stl">撤销这次结算</button>
       </div>
       <div class="sheet-actions"><button id="close" class="btn-block">返回</button></div>`, s.name);
