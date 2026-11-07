@@ -116,7 +116,6 @@
         const a = db.agents.find((x) => x.name === name && x.active);
         if (!a) return fail('找不到这个名字');
         if (!a.phone4 || a.phone4 !== phone4) return fail('手机号后 4 位不对，请再看一下');
-        if (a.device_token) return fail('这个名字已经在别的手机上登记过了，请找店面重置');
         a.device_token = uuid(); save(); ls.set(TOKEN_KEY, a.device_token); return a.device_token;
       },
       async auntStatement() {

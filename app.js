@@ -147,14 +147,16 @@
         const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/png'));
         const fname = `${name || '结算单'}.png`.replace(/[\\/:*?"<>|\s]+/g, '_');
         const file = new File([blob], fname, { type: 'image/png' });
-        if (navigator.canShare && navigator.canShare({ files: [file] }) && /Android|iPhone|iPad/.test(navigator.userAgent)) {
+        const mobile = /Android|iPhone|iPad/.test(navigator.userAgent), wechat = /MicroMessenger/i.test(navigator.userAgent);
+        if (!wechat && mobile && navigator.canShare && navigator.canShare({ files: [file] })) {
           try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
         }
-        const url = URL.createObjectURL(blob);
+        // 手机上用 data 地址，微信和 Safari 都能长按保存；电脑上给下载按钮
+        const url = mobile ? canvas.toDataURL('image/png') : URL.createObjectURL(blob);
         const ov = document.createElement('div'); ov.className = 'img-ov';
-        ov.innerHTML = `<div class="img-box"><div class="small muted">手机上：长按图片，选“保存图片”。电脑上：点下面的“下载图片”。</div>
-          <img src="${url}" alt="${esc(name)}"><div class="row" style="gap:8px"><a class="btn btn-primary grow" href="${url}" download="${esc(fname)}">下载图片</a><button class="grow" data-close>关闭</button></div></div>`;
-        ov.querySelector('[data-close]').onclick = () => { ov.remove(); URL.revokeObjectURL(url); };
+        ov.innerHTML = `<div class="img-box">${mobile ? '<div style="font-size:18px"><b>长按下面的图片</b>，选“保存图片”或“发送给朋友”。</div>' : '<div class="small muted">点下面的“下载图片”。</div>'}
+          <img src="${url}" alt="${esc(name)}"><div class="row" style="gap:8px">${mobile ? '' : `<a class="btn btn-primary grow" href="${url}" download="${esc(fname)}">下载图片</a>`}<button class="grow" data-close>关闭</button></div></div>`;
+        ov.querySelector('[data-close]').onclick = () => { ov.remove(); if (!mobile) URL.revokeObjectURL(url); };
         document.body.appendChild(ov);
       } catch (e) { toast(e.message || '生成图片失败'); }
       finally { sheet.classList.remove('capturing'); btn.textContent = old; btn.disabled = false; }
@@ -741,7 +743,8 @@
   // ---------- 登录 ----------
   function renderLogin() {
     app.innerHTML = `<div class="wrap stack" style="max-width:420px;padding-top:40px">
-      <h1>店面记账</h1><div class="muted">请用店面账号登录（每台手机/电脑登录一次即可）</div>
+      <h1>文城房产记账</h1><div class="muted">请用店面账号登录（每台手机/电脑登录一次即可）</div>
+      ${/MicroMessenger/i.test(navigator.userAgent) ? '<div class="notice err">现在是在微信里打开的，微信会清掉登录，所以每次都要重新登录。请点右上角“···”，选“在浏览器打开”，再把它添加到手机主屏幕。</div>' : ''}
       <form id="lf" class="card stack">
         <label class="field">邮箱<input type="email" id="lf-email" autocomplete="username" required></label>
         <label class="field">密码<input type="password" id="lf-pw" autocomplete="current-password" required></label>
