@@ -147,7 +147,7 @@
     const sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
     const cnErr = (m) => {
       if (/Invalid login/i.test(m)) return '邮箱或密码不对';
-      if (/Failed to fetch|NetworkError/i.test(m)) return '连不上网络，请检查后再试';
+      if (/Failed to fetch|NetworkError|Load failed|network/i.test(m)) return '连不上网络，请检查后再试';
       return m;
     };
     const q = async (p) => { const { data, error } = await p; if (error) throw new Error(cnErr(error.message)); return data; };
