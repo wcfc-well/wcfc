@@ -178,16 +178,24 @@ language sql security definer set search_path = public as $$
   select a.name, a.device_token is not null from agents a where a.active order by a.sort, a.id;
 $$;
 
+-- 业务员第一次打开：选名字 + 店面私下发的个人密码（存在 phone4 列）。输错 5 次锁住，要店面解锁。
+-- 输错时返回 'ERR:…' 而不是报错，这样输错次数才能存下来。
+alter table agents add column if not exists fail_count int not null default 0;
 create or replace function aunt_bind(p_name text, p_phone4 text) returns text
 language plpgsql security definer set search_path = public as $$
 declare a agents; t text;
 begin
   select * into a from agents where name = p_name and active;
-  if not found then raise exception '找不到这个名字'; end if;
-  if a.phone4 = '' or a.phone4 <> p_phone4 then raise exception '手机号后 4 位不对，请再看一下'; end if;
-  -- 换手机或微信清了缓存：输对后 4 位就重新绑定，旧手机自动失效
+  if not found then return 'ERR:找不到这个名字'; end if;
+  if a.fail_count >= 5 then return 'ERR:密码输错太多次，已经锁住了，请找店面解锁'; end if;
+  if a.phone4 = '' or a.phone4 <> p_phone4 then
+    update agents set fail_count = fail_count + 1 where id = a.id;
+    if a.fail_count + 1 >= 5 then return 'ERR:密码输错太多次，已经锁住了，请找店面解锁'; end if;
+    return 'ERR:密码不对，还能再试 ' || (4 - a.fail_count) || ' 次';
+  end if;
+  -- 换手机或微信清了缓存：输对密码就重新绑定，旧手机自动失效
   t := replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
-  update agents set device_token = t where id = a.id;
+  update agents set device_token = t, fail_count = 0 where id = a.id;
   return t;
 end $$;
 

@@ -635,10 +635,37 @@
   }
 
   // ---------- 业务员 ----------
+  // 个人密码：6 位随机数字，店面私下发给业务员（存在 phone4 这一列）
+  function newCode() {
+    const used = new Set(state.agents.map((a) => a.phone4));
+    for (;;) { const c = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0'); if (!used.has(c)) return c; }
+  }
+  const isLocked = (a) => (a.fail_count || 0) >= 5;
+  const agentPill = (a) => !a.active ? '<span class="pill gray">已停用</span>' : isLocked(a) ? '<span class="pill seal">输错太多次，已锁</span>'
+    : a.device_token ? '<span class="pill ok">已绑定手机</span>' : '<span class="pill gray">还没绑定手机</span>';
+  const codeMsg = (a) => `${a.name}，这是你在文城房产结算确认页面的个人密码：${a.phone4}\n只需要输入一次，请不要告诉别人。确认链接：${CONFIRM_URL()}`;
+  function openCodes() {
+    const list = state.agents.filter((a) => a.active);
+    const old = list.filter((a) => (a.phone4 || '').length < 6).length;
+    const sheet = openSheet(`<div class="wrap stack">
+        <h2>业务员个人密码</h2>
+        <div class="notice">每个人的密码只私聊发给本人，<b>不要发到群里</b>。点“复制”会复制一段话（名字 + 密码 + 链接），粘贴到和这个人的私聊里发出去就行。</div>
+        ${old ? `<div class="notice err">有 ${old} 个人的密码还是以前的手机后 4 位，同事之间可能都知道。建议点下面“全部换成新密码”，再一个个私发。</div>` : ''}
+        <div class="card agent-list">${list.map((a) => `<div class="agent-row"><b class="an">${esc(a.name)}</b><b class="num grow" style="letter-spacing:.1em;white-space:nowrap">${esc(a.phone4 || '—')}</b>${isLocked(a) ? agentPill(a) : ''}<button data-cp="${a.id}">复制</button></div>`).join('')}</div>
+        <button id="regen-all">全部换成新密码（大家要重新输一次）</button>
+      </div>
+      <div class="sheet-actions"><button id="cclose" class="btn-block">返回</button></div>`, '业务员个人密码');
+    $('#cclose', sheet).onclick = () => sheet.remove();
+    sheet.querySelectorAll('[data-cp]').forEach((b) => b.onclick = () => copy(codeMsg(list.find((a) => String(a.id) === b.dataset.cp))));
+    twice($('#regen-all', sheet), '确定全部换？再点一次', async () => {
+      await run(async () => { for (const a of list) { const c = newCode(); a.phone4 = c; await S.setCode(a.id, c); } });
+      await reload(); sheet.remove(); openCodes(); toast('已全部换好，请一个个私发');
+    });
+  }
   function renderAgents() {
     const rows = state.agents.map((a) => {
       const ds = state.deals.filter((d) => U.involves(d, a.name)); const sum = ds.reduce((x, d) => x + (C.calcDeal(d).people[a.name] || 0), 0);
-      const pill = a.active ? (a.device_token ? '<span class="pill ok">已绑定手机</span>' : '<span class="pill gray">还没绑定手机</span>') : '<span class="pill gray">已停用</span>';
+      const pill = agentPill(a);
       return `<button class="agent-row${a.active ? '' : ' off'}" data-perf="${esc(a.name)}"><b class="an">${esc(a.name)}</b><span class="muted small grow">${ds.length} 单 · <span class="num">${f(sum)}</span></span>${pill}<span class="muted">›</span></button>`;
     }).join('');
     shell(`
@@ -646,22 +673,23 @@
         <h3>业务员确认链接</h3>
         <input id="copy-src" readonly value="${esc(CONFIRM_URL())}" aria-label="确认链接">
         <button id="copy">复制链接</button>
-        <div class="small muted">所有业务员用同一个链接。第一次打开选自己的名字，输入手机号后 4 位，手机就记住了。换手机或点错了，点这个人的名字，里面有“重置手机登记”。</div>
+        <div class="small muted">所有业务员用同一个链接。第一次打开选自己的名字，输入店面私发的个人密码，手机就记住了。每个人只能看到自己的钱。</div>
+        <button id="codes">查看 / 私发业务员个人密码</button>
       </div>
       <h2>业务员名单（${state.agents.filter((a) => a.active).length} 人）</h2>
-      <div class="row" style="flex-wrap:nowrap"><input id="new-name" class="grow" style="min-width:0" placeholder="新来的业务员名字" aria-label="新来的业务员名字"><input id="new-ph" inputmode="numeric" maxlength="4" style="width:6.5em" placeholder="手机后4位" aria-label="手机号后 4 位"><button id="add-agent">添加</button></div>
-      <div class="small muted">点名字看这个人的每一单，手机号、重置登记、停用也在里面。</div>
+      <div class="row" style="flex-wrap:nowrap"><input id="new-name" class="grow" style="min-width:0" placeholder="新来的业务员名字" aria-label="新来的业务员名字"><button id="add-agent">添加</button></div>
+      <div class="small muted">添加时会自动生成个人密码。点名字看这个人的每一单，个人密码、解锁、停用也在里面。</div>
       <div class="card agent-list">${rows}</div>
       <div class="row">
         ${S.mode === 'demo' ? '<button id="demo-reset">恢复演示数据</button><a class="btn" href="confirm.html">打开业务员确认页（演示）</a>' : '<button id="logout">退出登录</button>'}
       </div>`);
     $('#copy').onclick = () => copy(CONFIRM_URL());
+    $('#codes').onclick = openCodes;
     $('#add-agent').onclick = async () => {
-      const n = $('#new-name').value.trim(), v = $('#new-ph').value.trim();
+      const n = $('#new-name').value.trim();
       if (!n) return toast('请填名字');
-      if (!/^\d{4}$/.test(v)) return toast('请填手机号后 4 位（4 个数字）');
       if (state.agents.some((a) => a.name === n)) return toast('已经有这个名字了');
-      await run(() => S.saveAgent({ name: n, phone4: v })); await reload(); toast('已添加 ' + n);
+      await run(() => S.saveAgent({ name: n, phone4: newCode() })); await reload(); openAgent(n); toast('已添加 ' + n + '，把个人密码私发给 TA');
     };
     app.querySelectorAll('[data-perf]').forEach((b) => b.onclick = () => openAgent(b.dataset.perf));
     if ($('#demo-reset')) $('#demo-reset').onclick = () => { S.demoReset(); location.reload(); };
@@ -709,16 +737,15 @@
           })()}
         </div>
         ${a ? `<div class="card stack no-print" style="gap:10px">
-          <div class="row between"><h3>手机登记</h3>${a.active ? (a.device_token ? '<span class="pill ok">已绑定手机</span>' : '<span class="pill gray">业务员还没在手机上输过</span>') : '<span class="pill gray">已停用</span>'}</div>
+          <div class="row between"><h3>个人密码</h3>${agentPill(a)}</div>
+          <div class="row" style="gap:10px"><b class="num grow" style="font-size:28px;letter-spacing:.2em">${esc(a.phone4 || '—')}</b><button id="code-copy">复制发给 TA</button></div>
+          ${(a.phone4 || '').length < 6 ? '<div class="notice err small">这还是以前的手机后 4 位，同事可能知道，建议点“换一个新密码”。</div>' : ''}
           <div class="row">
-            <label class="field grow">手机号后 4 位<input inputmode="numeric" maxlength="4" id="ph" value="${esc(a.phone4)}" placeholder="例如 1234"></label>
-            <button id="ph-save" style="align-self:flex-end">保存</button>
-          </div>
-          <div class="row">
-            ${a.device_token ? '<button id="a-reset">重置手机登记</button>' : ''}
+            <button id="code-new">换一个新密码</button>
+            ${isLocked(a) ? '<button id="a-reset" class="btn-primary">解锁</button>' : a.device_token ? '<button id="a-reset">退出 TA 的手机</button>' : ''}
             <button id="a-active">${a.active ? '停用' : '恢复'}</button>
           </div>
-          <div class="small muted">上面的后 4 位是给业务员第一次打开确认链接时输入用的。业务员输对以后，这里会变成“已绑定手机”。换手机或登记错了，点“重置手机登记”，就能重新登记。不在店里干了可以停用，以前的单子还在。</div>
+          <div class="small muted">密码只私聊发给本人。业务员第一次打开确认链接时输入，输对以后这里显示“已绑定手机”。输错 5 次会锁住，要点“解锁”。怀疑密码被别人知道了，就点“换一个新密码”，再私发给本人。不在店里干了可以停用，以前的单子还在。</div>
         </div>` : ''}
       </div>
       <div class="sheet-actions"><button id="aclose" class="btn-block">返回</button></div>`, name);
@@ -731,12 +758,9 @@
       openStatement({ title: '单笔结算单', sub: `${d.deal_date}　${d.title || ''}`, deals: [d], onClose: () => openAgent(name) });
     });
     const again = async (msg) => { await reload(); close(); openAgent(name); if (msg) toast(msg); };
-    if ($('#ph-save', sheet)) $('#ph-save', sheet).onclick = async () => {
-      const v = $('#ph', sheet).value.trim();
-      if (v && !/^\d{4}$/.test(v)) return toast('请填 4 位数字');
-      await run(() => S.saveAgent({ ...a, phone4: v })); await again('已保存');
-    };
-    if ($('#a-reset', sheet)) $('#a-reset', sheet).onclick = async () => { await run(() => S.resetBinding(a.id)); await again('已重置，可以重新登记了'); };
+    if ($('#code-copy', sheet)) $('#code-copy', sheet).onclick = () => copy(codeMsg(a));
+    if ($('#code-new', sheet)) twice($('#code-new', sheet), '确定换？再点一次', async () => { await run(() => S.setCode(a.id, newCode())); await again('已换好，记得私发新密码'); });
+    if ($('#a-reset', sheet)) $('#a-reset', sheet).onclick = async () => { await run(() => S.resetBinding(a.id)); await again(isLocked(a) ? '已解锁' : '已退出，TA 要重新输密码'); };
     if ($('#a-active', sheet)) $('#a-active', sheet).onclick = async () => { await run(() => S.saveAgent({ ...a, active: !a.active })); await again(a.active ? '已停用' : '已恢复'); };
   }
 

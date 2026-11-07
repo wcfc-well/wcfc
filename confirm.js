@@ -1,4 +1,4 @@
-// 业务员确认页：一个链接，第一次选名字 + 手机号后 4 位，以后自动认出是谁
+// 业务员确认页：一个链接，第一次选名字 + 店面私下发的个人密码，以后自动认出是谁
 (function () {
   const S = window.Store, C = window.Calc;
   const $ = (sel, el = document) => el.querySelector(sel);
@@ -16,7 +16,7 @@
       <h1>文城房产 · 结算确认</h1>
       <div class="muted">第一次打开，请点您自己的名字。</div>
       <div class="chips">${names.map((n) => `<button class="chip" data-n="${esc(n.name)}" >${esc(n.name)}</button>`).join('')}</div>
-      <div class="small muted">名字后面写着“已登记”的，说明已经在一部手机上登记过。如果是您自己换了手机，请找店面重置。</div>
+      <div class="small muted">换了手机也没关系，重新输一次店面发给您的密码就行。</div>
     </div>`;
     bindDemo();
     app.querySelectorAll('.chip').forEach((b) => b.onclick = () => askPhone(b.dataset.n));
@@ -26,12 +26,12 @@
     app.innerHTML = `<div class="wrap stack" style="max-width:520px">
       <h1>${esc(name)}，您好</h1>
       <form id="pf" class="card stack">
-        <label class="field">请输入您手机号的后 4 位<input id="p4" inputmode="numeric" maxlength="4" pattern="\\d{4}" autocomplete="off" required style="font-size:28px;letter-spacing:.3em;text-align:center"></label>
+        <label class="field">请输入店面私下发给您的密码<input id="p4" inputmode="numeric" maxlength="6" pattern="\\d{4,6}" autocomplete="off" required style="font-size:28px;letter-spacing:.3em;text-align:center"></label>
         <div id="err" class="notice err" hidden></div>
         <button class="btn-primary" type="submit">确定</button>
         <button type="button" id="notme">我不是${esc(name)}，重新选</button>
       </form>
-      <div class="small muted">只需要输入这一次，以后这部手机打开就直接是您的账。</div>
+      <div class="small muted">只需要输入这一次，以后这部手机打开就直接是您的账。密码不要告诉别人，别人知道了就能看到您的钱。</div>
     </div>`;
     $('#p4').focus();
     $('#notme').onclick = pickName;

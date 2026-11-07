@@ -26,7 +26,7 @@
     let db = null;
     try { db = JSON.parse(ls.get(KEY)); } catch (e) { db = null; }
     if (!db) {
-      const phones = ['1234', '2345', '3456', '4567', '5678', '6789', '7890', '8901', '9012', '0123', '1357', '2468', '3579'];
+      const phones = ['381624', '507293', '916458', '240871', '673105', '158936', '829460', '435712', '062947', '794318', '316580', '587024', '903265'];
       const okAll = (id, names, at) => names.map((n) => ({ deal_id: id, agent_name: n, status: 'ok', note: '', at }));
       db = {
         seq: 100,
@@ -73,7 +73,8 @@
         else db.agents.push({ name: a.name, phone4: a.phone4 || '', id: ++db.seq, device_token: null, sort: db.agents.length, active: true });
         save(); return true;
       },
-      async resetBinding(id) { db.agents.find((x) => x.id === id).device_token = null; save(); },
+      async resetBinding(id) { Object.assign(db.agents.find((x) => x.id === id), { device_token: null, fail_count: 0 }); save(); },
+      async setCode(id, code) { Object.assign(db.agents.find((x) => x.id === id), { phone4: code, device_token: null, fail_count: 0 }); save(); },
       listDeals: () => ok(db.deals.slice().sort((a, b) => (b.deal_date + String(b.id).padStart(8, '0')).localeCompare(a.deal_date + String(a.id).padStart(8, '0')))),
       // send=true：保存并发给业务员确认；false：保存为草稿
       async saveDeal(d, send) {
@@ -115,7 +116,9 @@
       async auntBind(name, phone4) {
         const a = db.agents.find((x) => x.name === name && x.active);
         if (!a) return fail('找不到这个名字');
-        if (!a.phone4 || a.phone4 !== phone4) return fail('手机号后 4 位不对，请再看一下');
+        if ((a.fail_count || 0) >= 5) return fail('密码输错太多次，已经锁住了，请找店面解锁');
+        if (!a.phone4 || a.phone4 !== phone4) { a.fail_count = (a.fail_count || 0) + 1; save(); return fail(a.fail_count >= 5 ? '密码输错太多次，已经锁住了，请找店面解锁' : `密码不对，还能再试 ${5 - a.fail_count} 次`); }
+        a.fail_count = 0;
         a.device_token = uuid(); save(); ls.set(TOKEN_KEY, a.device_token); return a.device_token;
       },
       async auntStatement() {
@@ -163,7 +166,8 @@
         else { const list = await q(sb.from('agents').select('id')); await q(sb.from('agents').insert({ ...row, sort: list.length })); }
         return true;
       },
-      resetBinding: (id) => q(sb.from('agents').update({ device_token: null }).eq('id', id)),
+      resetBinding: (id) => q(sb.from('agents').update({ device_token: null, fail_count: 0 }).eq('id', id)),
+      setCode: (id, code) => q(sb.from('agents').update({ phone4: code, device_token: null, fail_count: 0 }).eq('id', id)),
       listDeals: () => q(sb.from('deals').select('*').order('deal_date', { ascending: false }).order('id', { ascending: false })),
       async saveDeal(d, send) {
         const row = { deal_date: d.deal_date, type: d.type, title: d.title || '', owner_name: d.owner_name || '', customer_name: d.customer_name || '', incomes: d.incomes, expenses: d.expenses, listing_agents: d.listing_agents, client_agents: d.client_agents, note: d.note || '', status: send ? 'confirming' : 'draft' };
@@ -178,7 +182,11 @@
       listConfirmations: () => q(sb.from('confirmations').select('*')),
 
       auntNames: () => q(sb.rpc('aunt_names')),
-      async auntBind(name, phone4) { const t = await q(sb.rpc('aunt_bind', { p_name: name, p_phone4: phone4 })); ls.set(TOKEN_KEY, t); return t; },
+      async auntBind(name, phone4) {
+        const t = await q(sb.rpc('aunt_bind', { p_name: name, p_phone4: phone4 }));
+        if (!t || String(t).startsWith('ERR:')) throw new Error(t ? String(t).slice(4) : '登记失败，请再试一次');
+        ls.set(TOKEN_KEY, t); return t;
+      },
       async auntStatement() {
         if (!token()) return null;
         const r = await q(sb.rpc('aunt_statement', { p_token: token() }));
