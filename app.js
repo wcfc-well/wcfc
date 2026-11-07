@@ -231,7 +231,7 @@
     const names = state.agents.filter((a) => a.active || d.listing_agents.includes(a.name) || d.client_agents.includes(a.name)).map((a) => a.name);
     const dis = locked ? 'disabled' : '';
     // 维护费可以有好几个人垫钱：一行一个人（垫付人 + 备注 + 金额），点“＋”再加一行
-    const payOpts = (sel) => `<option value="">已付清</option>${names.concat(sel && !names.includes(sel) ? [sel] : []).map((n) => `<option value="${esc(n)}" ${sel === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}`;
+    const payOpts = (sel) => `<option value="">周姐</option>${names.concat(sel && !names.includes(sel) ? [sel] : []).map((n) => `<option value="${esc(n)}" ${sel === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}`;
     const mline = (t, it, on) => `<div class="mline" data-m="${t}">
         <select class="paid" data-mpaid ${on ? '' : 'disabled'} aria-label="谁垫付的">${payOpts(it && it.paid_by)}</select>
         <input class="person" data-mmemo value="${esc(it ? it.memo || it.person || '' : '')}" placeholder="备注" ${on ? '' : 'disabled'} aria-label="备注">
@@ -253,7 +253,7 @@
       const extra = ex ? `<input class="person" data-x2="${t}" value="${esc(xv)}" placeholder="${ex === 'person' ? '介绍人名字' : '备注'}" ${it && !locked ? '' : 'disabled'} aria-label="${t}的${ex === 'person' ? '介绍人' : '备注'}">` : '';
       const payers = names.concat(it && it.paid_by && !names.includes(it.paid_by) ? [it.paid_by] : []);
       const paid = kind === 'expenses' ? `<select class="paid" data-paid="${t}" ${it && !locked ? '' : 'disabled'} ${it ? '' : 'hidden'} aria-label="${t}是谁付的" style="grid-column:1/-1">
-          <option value="">已付清</option>${payers.map((n) => `<option value="${esc(n)}" ${it && it.paid_by === n ? 'selected' : ''}>${esc(n)}垫付</option>`).join('')}</select>` : '';
+          <option value="">周姐</option>${payers.map((n) => `<option value="${esc(n)}" ${it && it.paid_by === n ? 'selected' : ''}>${esc(n)}垫付</option>`).join('')}</select>` : '';
       return `<div class="money-row${ex ? ' with-person' : ''}"><label><input type="checkbox" data-kind="${kind}" data-t="${t}" ${it ? 'checked' : ''} ${dis}>${t}</label>${extra}
         <input type="text" class="amt" inputmode="decimal" autocomplete="off" data-kind="${kind}" data-t="${t}" value="${it ? it.amount : ''}" placeholder="0" ${it && !locked ? '' : 'disabled'} aria-label="${t}金额">${bank}${paid}</div>`;
     }).join('');
@@ -283,7 +283,7 @@
         </div>
         <div class="card"><h3>收入（勾选这一单有的）</h3><div id="income-rows"></div></div>
         <div class="card"><h3>这一单的支出</h3><div id="expense-rows"></div>
-          <div class="small muted" style="margin-top:6px">介绍费写介绍人名字。维护费一行一个人：选谁垫的钱、写备注（例如请吃饭）和金额，好几个人垫钱就点“＋ 再加一个人”。选了名字的，结算时这笔钱会还给这个人；没人垫就选“已付清”。</div></div>
+          <div class="small muted" style="margin-top:6px">介绍费写介绍人名字。维护费一行一个人：选谁垫的钱、写备注（例如请吃饭）和金额，好几个人垫钱就点“＋ 再加一个人”。选了名字的，结算时这笔钱会还给这个人；店里（周姐）付的就选“周姐”。</div></div>
         <div class="card stack" id="listing-box"><h3>房源方业务员（可多选）</h3><div class="chips">${chips('listing_agents')}</div></div>
         <div class="card stack"><h3>客户方业务员（可多选）</h3><div class="chips">${chips('client_agents')}</div></div>
         <label class="field">备注<textarea id="f-note" rows="2" ${dis}>${esc(d.note)}</textarea></label>
