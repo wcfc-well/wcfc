@@ -186,7 +186,7 @@ begin
   if not found then raise exception '找不到这个名字'; end if;
   if a.phone4 = '' or a.phone4 <> p_phone4 then raise exception '手机号后 4 位不对，请再看一下'; end if;
   if a.device_token is not null then raise exception '这个名字已经在别的手机上登记过了，请找店面重置'; end if;
-  t := encode(gen_random_bytes(24), 'hex');
+  t := replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
   update agents set device_token = t where id = a.id;
   return t;
 end $$;

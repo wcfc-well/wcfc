@@ -636,7 +636,7 @@
   function renderAgents() {
     const rows = state.agents.map((a) => {
       const ds = state.deals.filter((d) => U.involves(d, a.name)); const sum = ds.reduce((x, d) => x + (C.calcDeal(d).people[a.name] || 0), 0);
-      const pill = a.active ? (a.device_token ? '<span class="pill ok">已登记</span>' : '<span class="pill gray">没登记</span>') : '<span class="pill gray">已停用</span>';
+      const pill = a.active ? (a.device_token ? '<span class="pill ok">已绑定手机</span>' : '<span class="pill gray">还没绑定手机</span>') : '<span class="pill gray">已停用</span>';
       return `<button class="agent-row${a.active ? '' : ' off'}" data-perf="${esc(a.name)}"><b class="an">${esc(a.name)}</b><span class="muted small grow">${ds.length} 单 · <span class="num">${f(sum)}</span></span>${pill}<span class="muted">›</span></button>`;
     }).join('');
     shell(`
@@ -644,7 +644,7 @@
         <h3>业务员确认链接</h3>
         <input id="copy-src" readonly value="${esc(CONFIRM_URL())}" aria-label="确认链接">
         <button id="copy">复制链接</button>
-        <div class="small muted">所有业务员用同一个链接。第一次打开选自己的名字，输入手机号后 4 位，手机就记住她了。换手机或点错了，点她的名字，里面有“重置手机登记”。</div>
+        <div class="small muted">所有业务员用同一个链接。第一次打开选自己的名字，输入手机号后 4 位，手机就记住了。换手机或点错了，点这个人的名字，里面有“重置手机登记”。</div>
       </div>
       <h2>业务员名单（${state.agents.filter((a) => a.active).length} 人）</h2>
       <div class="row" style="flex-wrap:nowrap"><input id="new-name" class="grow" style="min-width:0" placeholder="新来的业务员名字" aria-label="新来的业务员名字"><input id="new-ph" inputmode="numeric" maxlength="4" style="width:6.5em" placeholder="手机后4位" aria-label="手机号后 4 位"><button id="add-agent">添加</button></div>
@@ -707,7 +707,7 @@
           })()}
         </div>
         ${a ? `<div class="card stack no-print" style="gap:10px">
-          <div class="row between"><h3>手机登记</h3>${a.active ? (a.device_token ? '<span class="pill ok">已登记手机</span>' : '<span class="pill gray">还没登记</span>') : '<span class="pill gray">已停用</span>'}</div>
+          <div class="row between"><h3>手机登记</h3>${a.active ? (a.device_token ? '<span class="pill ok">已绑定手机</span>' : '<span class="pill gray">业务员还没在手机上输过</span>') : '<span class="pill gray">已停用</span>'}</div>
           <div class="row">
             <label class="field grow">手机号后 4 位<input inputmode="numeric" maxlength="4" id="ph" value="${esc(a.phone4)}" placeholder="例如 1234"></label>
             <button id="ph-save" style="align-self:flex-end">保存</button>
@@ -716,7 +716,7 @@
             ${a.device_token ? '<button id="a-reset">重置手机登记</button>' : ''}
             <button id="a-active">${a.active ? '停用' : '恢复'}</button>
           </div>
-          <div class="small muted">换手机或登记错了，点“重置手机登记”，她就能重新登记。不在店里干了可以停用，以前的单子还在。</div>
+          <div class="small muted">上面的后 4 位是给业务员第一次打开确认链接时输入用的。业务员输对以后，这里会变成“已绑定手机”。换手机或登记错了，点“重置手机登记”，就能重新登记。不在店里干了可以停用，以前的单子还在。</div>
         </div>` : ''}
       </div>
       <div class="sheet-actions"><button id="aclose" class="btn-block">返回</button></div>`, name);
