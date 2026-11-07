@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>店面结算确认</title>
+<meta name="theme-color" content="#17675a">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app"><div class="wrap muted">正在打开…</div></div>
+<script src="config.js"></script>
+<script>if (window.APP_CONFIG && window.APP_CONFIG.supabaseUrl) document.write('<script src="vendor/supabase.js"><\/script>');</script>
+<script src="calc.js"></script>
+<script src="store.js"></script>
+<script src="confirm.js"></script>
+<script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js');</script>
+</body>
+</html>
