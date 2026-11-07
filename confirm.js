@@ -13,7 +13,7 @@
     const names = await S.auntNames();
     app.innerHTML = `<div class="wrap stack" style="max-width:520px">
       ${demoBar()}
-      <h1>店面结算确认</h1>
+      <h1>文城房产 · 结算确认</h1>
       <div class="muted">第一次打开，请点您自己的名字。</div>
       <div class="chips">${names.map((n) => `<button class="chip" data-n="${esc(n.name)}" ${n.bound ? 'disabled' : ''}>${esc(n.name)}${n.bound ? '（已登记）' : ''}</button>`).join('')}</div>
       <div class="small muted">名字后面写着“已登记”的，说明已经在一部手机上登记过。如果是您自己换了手机，请找店面重置。</div>

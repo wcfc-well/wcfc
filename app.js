@@ -117,12 +117,51 @@
       ${breakdownHTML(d, forStatement)}${d.note ? `<div class="small muted">备注：${esc(d.note)}</div>` : ''}</details>`;
   }
 
+  // ---------- 打印 / 存 PDF / 存图片（结算单、店面收入、业务员业绩共用） ----------
+  const exportButtons = () => window.NO_PRINT
+    ? '<div class="notice small">这是网页预览版，不能打印或保存。正式版这里有“打印”“存成 PDF”“存成图片”三个按钮。</div>'
+    : `<div class="export-bar"><button data-x="print">打印</button><button data-x="pdf">存成 PDF</button><button class="btn-primary" data-x="img">存成图片</button></div>`;
+  function openAll(sheet) { sheet.querySelectorAll('details').forEach((x) => { x.open = true; }); }
+  let h2cLoading = null;
+  const loadH2C = () => window.html2canvas ? Promise.resolve() : (h2cLoading = h2cLoading || new Promise((ok, bad) => {
+    const sc = document.createElement('script'); sc.src = 'vendor/html2canvas.min.js'; sc.onload = ok; sc.onerror = () => { h2cLoading = null; bad(new Error('加载失败，请检查网络')); }; document.head.appendChild(sc);
+  }));
+  function bindExport(sheet, name) {
+    const b = (x) => sheet.querySelector(`[data-x=${x}]`);
+    if (!b('print')) return;
+    b('print').onclick = () => { openAll(sheet); window.print(); };
+    b('pdf').onclick = () => { openAll(sheet); toast(/Mac|Win/.test(navigator.platform) ? '打印窗口里，目标打印机选“存储为 PDF”' : '打印窗口里，打印机选“另存为 PDF”'); setTimeout(() => window.print(), 600); };
+    b('img').onclick = async () => {
+      const btn = b('img'); const old = btn.textContent; btn.textContent = '正在生成…'; btn.disabled = true;
+      try {
+        await loadH2C(); openAll(sheet);
+        const card = sheet.querySelector('.wrap > .card:not(.no-print)');
+        sheet.classList.add('capturing'); await new Promise((r) => setTimeout(r, 50));
+        const canvas = await window.html2canvas(card, { windowWidth: 820, scale: 2, backgroundColor: '#ffffff', ignoreElements: (el) => el.classList && (el.classList.contains('no-print') || el.classList.contains('dd-hint')) });
+        sheet.classList.remove('capturing');
+        const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/png'));
+        const fname = `${name || '结算单'}.png`.replace(/[\\/:*?"<>|\s]+/g, '_');
+        const file = new File([blob], fname, { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] }) && /Android|iPhone|iPad/.test(navigator.userAgent)) {
+          try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
+        }
+        const url = URL.createObjectURL(blob);
+        const ov = document.createElement('div'); ov.className = 'img-ov';
+        ov.innerHTML = `<div class="img-box"><div class="small muted">手机上：长按图片，选“保存图片”。电脑上：点下面的“下载图片”。</div>
+          <img src="${url}" alt="${esc(name)}"><div class="row" style="gap:8px"><a class="btn btn-primary grow" href="${url}" download="${esc(fname)}">下载图片</a><button class="grow" data-close>关闭</button></div></div>`;
+        ov.querySelector('[data-close]').onclick = () => { ov.remove(); URL.revokeObjectURL(url); };
+        document.body.appendChild(ov);
+      } catch (e) { toast(e.message || '生成图片失败'); }
+      finally { sheet.classList.remove('capturing'); btn.textContent = old; btn.disabled = false; }
+    };
+  }
+
   // ---------- 外框 ----------
   function shell(inner, extra = '') {
     const demo = S.mode === 'demo' ? '<span class="badge-demo">演示数据</span>' : '';
     app.innerHTML = `
       <div class="wrap" id="main">
-        <div class="topbar"><h1>店面记账</h1>${demo}</div>
+        <div class="topbar"><h1>文城房产 · 店面记账</h1>${demo}</div>
         <div id="view" class="stack">${inner}</div>
       </div>${extra}
       <nav class="tabbar" aria-label="主菜单">
@@ -422,12 +461,15 @@
   }
 
   function openSummaryPicker(internal) {
-    const months = [...new Set(state.deals.map((d) => d.deal_date.slice(0, 7)))].sort().reverse();
+    const okDeals = state.deals.filter((d) => d.status === 'locked'); // 只算业务员都确认过的（包括已经结算的）
+    const months = [...new Set(okDeals.map((d) => d.deal_date.slice(0, 7)))].sort().reverse();
     const sheet = openSheet(`
       <div class="wrap stack">
         <h2>${internal ? '店面对账单' : '业务员结算单'}</h2>
         ${internal ? '<div class="notice err small">只给店面自己看：包括每位业务员和店面各拿多少，用来对账。不要发到群里。</div>'
           : '<div class="notice info small">发到群里用：写清每位业务员一共应得多少，上面不显示店面拿多少。</div>'}
+        <div class="small muted">只包括业务员都已经确认的单子（已经结算过的也算在内）。还在等确认的单子不会出现在这里。</div>
+        ${months.length ? '' : '<div class="card muted">还没有业务员都确认过的单子。</div>'}
         <div class="card stack"><h3>1. 选月份</h3>${months.map((m) => `<label class="row" style="gap:10px"><input type="checkbox" data-m="${m}" checked style="width:22px;height:22px;min-height:0">${monthLabel(m)}</label>`).join('')}</div>
         <div class="card stack"><h3>2. 截止到哪一单</h3>
           <select id="sp-end" aria-label="截止到哪一单"></select>
@@ -436,7 +478,7 @@
       <div class="sheet-actions"><button id="sp-cancel">取消</button><button class="btn-primary" id="sp-go">生成${internal ? '店面对账单' : '业务员结算单'}</button></div>`, '结算单');
     const picked = () => {
       const ms = [...sheet.querySelectorAll('[data-m]')].filter((c) => c.checked).map((c) => c.dataset.m);
-      return state.deals.filter((d) => ms.includes(d.deal_date.slice(0, 7))).sort((a, b) => a.deal_date.localeCompare(b.deal_date) || a.id - b.id);
+      return okDeals.filter((d) => ms.includes(d.deal_date.slice(0, 7))).sort((a, b) => a.deal_date.localeCompare(b.deal_date) || a.id - b.id);
     };
     const count = () => {
       const list = picked(); const i = list.findIndex((d) => String(d.id) === $('#sp-end', sheet).value);
@@ -492,7 +534,7 @@
       <div class="wrap stack">
         <div class="card stack no-print" style="gap:10px">
           <div class="row" style="flex-wrap:nowrap;gap:8px"><label class="field grow" style="min-width:0">从<select id="in-from">${opt(from)}</select></label><label class="field grow" style="min-width:0">到<select id="in-to">${opt(to)}</select></label></div>
-          ${window.NO_PRINT ? '' : '<button class="btn-primary" id="print">打印 / 存成 PDF</button>'}
+          ${exportButtons()}
         </div>
         <div class="card stack">
           <div><h1>店面收入</h1><div class="muted">${span}</div><div class="muted small">只给店面自己看，不要发到群里。</div></div>
@@ -515,7 +557,7 @@
     const go = (a, b) => { close(); openStoreIncome(a, b); };
     $('#in-from', sheet).onchange = () => go($('#in-from', sheet).value, $('#in-to', sheet).value);
     $('#in-to', sheet).onchange = () => go($('#in-from', sheet).value, $('#in-to', sheet).value);
-    if ($('#print', sheet)) $('#print', sheet).onclick = () => window.print();
+    bindExport(sheet, '店面收入');
   }
 
   // ---------- 结算单（可打印 / 存 PDF） ----------
@@ -528,8 +570,7 @@
     const d0 = deals[0];
     const sheet = openSheet(`
       <div class="wrap stack">
-        <div class="row between no-print"><span class="muted small">结算单预览</span>${window.NO_PRINT ? '' : '<button class="btn-primary" id="print">打印 / 存成 PDF</button>'}</div>
-        ${window.NO_PRINT ? '<div class="notice no-print small">这是网页预览版，不能打印。正式版这里有“打印 / 存成 PDF”按钮。</div>' : '<div class="notice info no-print small">手机上：点“打印 / 存成 PDF”，打印机选“另存为 PDF”。Mac 上：打印窗口左下角选“存储为 PDF”。</div>'}
+        <div class="stack no-print" style="gap:6px"><span class="muted small">结算单预览</span>${exportButtons()}</div>
         <div class="card stack">
           <div class="row between"><div><h1>店面${title}</h1><div class="muted">${esc(sub)}</div></div>
             ${settled ? '<span class="stamp">已结算</span>' : ''}</div>
@@ -569,7 +610,7 @@
     sheet.id = 'statement';
     document.body.classList.add('printing');
     $('#sclose', sheet).onclick = () => { sheet.remove(); document.body.classList.remove('printing'); if (onClose) onClose(); };
-    if ($('#print', sheet)) $('#print', sheet).onclick = () => { sheet.querySelectorAll('details').forEach((x) => x.open = true); window.print(); };
+    bindExport(sheet, title);
   }
 
   // ---------- 业务员 ----------
@@ -617,7 +658,7 @@
     const stTxt = (d) => d.settlement_id ? '已结算' : d.status === 'locked' ? '已确认，等结算' : '等确认';
     const sheet = openSheet(`
       <div class="wrap stack">
-        <div class="row between no-print"><span class="muted small">业务员业绩</span>${window.NO_PRINT ? '' : '<button class="btn-primary" id="print">打印 / 存成 PDF</button>'}</div>
+        <div class="stack no-print" style="gap:6px"><span class="muted small">业务员业绩</span>${exportButtons()}</div>
         <div class="card stack">
           <h1>${esc(name)} 的成交记录</h1>
           <div class="tiles">
@@ -663,7 +704,7 @@
     sheet.id = 'statement'; document.body.classList.add('printing');
     const close = () => { sheet.remove(); document.body.classList.remove('printing'); };
     $('#aclose', sheet).onclick = close;
-    if ($('#print', sheet)) $('#print', sheet).onclick = () => { sheet.querySelectorAll('details').forEach((x) => x.open = true); window.print(); };
+    bindExport(sheet, name + '的成交记录');
     sheet.querySelectorAll('[data-d]').forEach((b) => b.onclick = () => {
       const d = state.deals.find((x) => String(x.id) === b.dataset.d); close();
       openStatement({ title: '单笔结算单', sub: `${d.deal_date}　${d.title || ''}`, deals: [d], onClose: () => openAgent(name) });
