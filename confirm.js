@@ -51,13 +51,14 @@
       <div class="bd">
         <div class="bd-group">
           ${d.incomes.map((i) => `<span class="sub">${esc(i.type + (i.bank ? '（' + i.bank + '）' : '') + (i.person ? '（' + i.person + '）' : ''))}</span><span class="num sub">${C.fmt(C.toFen(i.amount))}</span>`).join('')}
-          ${d.expenses.map((i) => `<span class="sub">减：${esc(i.type)}</span><span class="num sub">-${C.fmt(C.toFen(i.amount))}</span>`).join('')}
+          ${d.expenses.map((i) => `<span class="sub">减：${esc(i.type + (i.person ? '（' + i.person + '）' : '') + (i.memo ? '（' + i.memo + '）' : '') + (i.paid_by ? '（' + i.paid_by + '垫付）' : ''))}</span><span class="num sub">-${C.fmt(C.toFen(i.amount))}</span>`).join('')}
           <span class="bd-key">总账</span><span class="num bd-key">${C.fmt(r.net)}</span></div>
         <div class="bd-group">${r.rate ? `<span>减：店面维护 ${r.rate}%</span><span class="num">-${C.fmt(r.maint)}</span>` : '<span class="sub" style="grid-column:1/-1">新房不扣店面维护</span>'}
           <span class="bd-key">纯利润</span><span class="num bd-key">${C.fmt(r.rest)}</span></div>
         <div class="bd-group">
           ${d.type !== '新房' && d.listing_agents.includes(name) ? `<span>房源方 20% 的业务员一半${partners(d.listing_agents)}</span><span class="num">${C.fmt(r.listingBlock - r.listing.store)}</span>` : ''}
           ${d.client_agents.includes(name) ? `<span>客户方 ${d.type === '新房' ? '100%' : '80%'} 的业务员一半${partners(d.client_agents)}</span><span class="num">${C.fmt(r.clientBlock - r.client.store)}</span>` : ''}
+          ${r.reimb[name] ? `<span>加：我先垫付的钱（店里还我）</span><span class="num">+${C.fmt(r.reimb[name])}</span>` : ''}
           <span class="bd-key">我这一单（${roles}）</span><span class="num bd-key">${C.fmt(mine)}</span></div>
       </div></div>` };
   }

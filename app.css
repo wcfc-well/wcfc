@@ -83,7 +83,8 @@ label.field { display: flex; flex-direction: column; gap: 4px; font-size: 15px; 
 .money-row { display: grid; grid-template-columns: 1fr 140px; gap: 10px; align-items: center; padding-block: 4px; }
 .money-row label { display: flex; gap: 10px; align-items: center; font-size: 16px; }
 .money-row input[type=checkbox] { width: 22px; height: 22px; min-height: 0; accent-color: var(--accent); }
-.money-row input[type=number] { text-align: right; font-family: var(--font-num); }
+.money-row input.amt { text-align: right; font-family: var(--font-num); }
+.money-row select.paid { font-size: 15px; }
 
 .kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
 .kv .num { text-align: right; }

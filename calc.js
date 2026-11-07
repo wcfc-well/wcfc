@@ -6,6 +6,7 @@
 //   二手/租房：房源方 20%，客户方 80%；新房：没有房源方，100% 客户方
 //   每一块：店面拿一半，业务员一半由这一块的业务员平分
 //   零头：店面那部分向下取整到分，多出来的分归业务员（按名单顺序逐个多给 1 分）
+//   支出里标了“某业务员垫付”的，照样从总账里扣，结算时再把这笔钱加给垫付的人
 
 (function (root) {
   const INCOME_TYPES = ['卖房房东佣金', '卖房客户佣金', '租房佣金', '开发商佣金', '银行返点', '装修返点', '垫资返点', '其他收入'];
@@ -66,21 +67,29 @@
     const add = (n, v) => { people[n] = (people[n] || 0) + v; };
     Object.entries(L.agents).forEach(([n, v]) => add(n, v));
     Object.entries(C.agents).forEach(([n, v]) => add(n, v));
+    // 业务员先垫付、还没还的支出：结算时加回给垫付的人
+    const share = { ...people };
+    const reimb = {};
+    (deal.expenses || []).forEach((it) => { if (it.paid_by) reimb[it.paid_by] = (reimb[it.paid_by] || 0) + toFen(it.amount); });
+    Object.entries(reimb).forEach(([n, v]) => add(n, v));
+    const reimbTotal = Object.values(reimb).reduce((a, b) => a + b, 0);
     const store = maint + L.store + C.store;
     const warnings = [];
     if (!isNew && listingBlock > 0 && (!deal.listing_agents || !deal.listing_agents.length)) warnings.push('没有选房源方业务员，房源方的钱暂时全算给店面');
     if (clientBlock > 0 && (!deal.client_agents || !deal.client_agents.length)) warnings.push('没有选客户方业务员，客户方的钱暂时全算给店面');
     if (net < 0) warnings.push('这一单支出大于收入');
-    return { income, expense, net, maint, rate, rest, listingBlock, clientBlock, listing: L, client: C, store, people, warnings };
+    const inDeal = [...(isNew ? [] : deal.listing_agents || []), ...(deal.client_agents || [])];
+    Object.keys(reimb).forEach((n) => { if (!inDeal.includes(n)) warnings.push(`${n}垫付了钱，但不是这一单的业务员，结算单上不会显示，请把垫付人改成这一单的业务员`); });
+    return { income, expense, net, maint, rate, rest, listingBlock, clientBlock, listing: L, client: C, store, people, share, reimb, reimbTotal, warnings };
   }
 
   // 汇总一期
   function calcPeriod(deals) {
-    const totals = { income: 0, expense: 0, net: 0, maint: 0, store: 0, people: {} };
+    const totals = { income: 0, expense: 0, net: 0, maint: 0, store: 0, reimb: 0, people: {} };
     const rows = deals.map((d) => {
       const r = calcDeal(d);
       totals.income += r.income; totals.expense += r.expense; totals.net += r.net;
-      totals.maint += r.maint; totals.store += r.store;
+      totals.maint += r.maint; totals.store += r.store; totals.reimb += r.reimbTotal;
       Object.entries(r.people).forEach(([n, v]) => { totals.people[n] = (totals.people[n] || 0) + v; });
       return { deal: d, r };
     });

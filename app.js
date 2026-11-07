@@ -75,9 +75,12 @@
   const whoText = (d) => [d.type !== '新房' && d.listing_agents.length ? '房源方：' + d.listing_agents.join('、') : '', d.client_agents.length ? '客户方：' + d.client_agents.join('、') : ''].filter(Boolean).join('　') || '还没选业务员';
 
   // ---------- 分账明细（编辑页和单张结算单共用） ----------
-  const itemName = (i) => i.type + (i.bank ? `（${i.bank}）` : '') + (i.person ? `（${i.person}）` : '');
-  // 介绍费、维护费按房东方 / 客户方绑定同一个介绍人
-  const PERSON_SIDE = { '房东介绍费': 'owner', '房东维护费': 'owner', '客户介绍费': 'cust', '客户维护费': 'cust' };
+  const itemName = (i) => i.type + (i.bank ? `（${i.bank}）` : '') + (i.person ? `（${i.person}）` : '') + (i.memo ? `（${i.memo}）` : '') + (i.paid_by ? `（${i.paid_by}垫付）` : '');
+  // 介绍费写介绍人名字；维护费写备注（例如请吃饭）
+  const EXTRA_FIELD = { '房东介绍费': 'person', '客户介绍费': 'person', '房东维护费': 'memo', '客户维护费': 'memo' };
+  const reimbHTML = (r) => r.reimbTotal ? `<div class="bd-group"><span class="bd-title">业务员垫付的钱（结算时还给 TA）</span>
+        ${Object.entries(r.reimb).map(([n, v]) => `<span>${esc(n)}</span><span class="num">+${f(v)}</span>`).join('')}
+        <span class="sub" style="grid-column:1/-1">这笔钱上面已经算在支出里扣掉了，所以结算时单独加给垫付的人。</span></div>` : '';
   // forStatement=true 时用于结算单：不显示店面拿多少
   function breakdownHTML(d, forStatement) {
     const r = C.calcDeal(d);
@@ -100,9 +103,11 @@
         <span class="bd-key">纯利润</span><span class="num bd-key">${f(r.rest)}</span></div>
       ${d.type === '新房' ? block('三、客户方 100%（新房，没有房源方）', r.clientBlock, r.client, d.client_agents)
         : block('三、房源方 20%', r.listingBlock, r.listing, d.listing_agents) + block('四、客户方 80%', r.clientBlock, r.client, d.client_agents)}
+      ${reimbHTML(r)}
       ${forStatement ? '' : `<div class="bd-group bd-store"><span class="bd-title">这一单合计</span>
         <span class="bd-key" style="border:0;padding:0">店面</span><span class="num bd-key" style="border:0;padding:0">${f(r.store)}</span>
-        <span class="bd-key">业务员</span><span class="num bd-key">${f(r.net - r.store)}</span>
+        ${r.reimbTotal ? `<span class="sub">业务员分成</span><span class="num sub">${f(r.net - r.store)}</span><span class="sub">加：还业务员垫付</span><span class="num sub">${f(r.reimbTotal)}</span>` : ''}
+        <span class="bd-key">业务员</span><span class="num bd-key">${f(r.net - r.store + r.reimbTotal)}</span>
         ${Object.entries(r.people).map(([n, v]) => `<span class="sub">　${esc(n)}</span><span class="num sub">${f(v)}</span>`).join('')}</div>`}
       ${r.warnings.map((w) => `<div class="notice">${esc(w)}</div>`).join('')}
     </div>`;
@@ -225,11 +230,15 @@
     const moneyRows = (kind, types) => types.map((t) => {
       const it = d[kind].find((x) => x.type === t);
       const bank = t === '银行返点' ? `<input class="bank" data-bank="1" value="${esc(it && it.bank || '')}" placeholder="哪家银行，例如：农行" ${it && !locked ? '' : 'disabled'} aria-label="哪家银行" style="grid-column:1/-1">` : '';
-      const side = kind === 'expenses' && PERSON_SIDE[t];
-      const pv = side ? ((it && it.person) || (d.expenses.find((x) => PERSON_SIDE[x.type] === side && x.person) || {}).person || '') : '';
-      const person = side ? `<input class="person" data-person="${side}" data-pt="${t}" value="${esc(pv)}" placeholder="介绍人名字" ${it && !locked ? '' : 'disabled'} aria-label="${t}的介绍人">` : '';
-      return `<div class="money-row${side ? ' with-person' : ''}"><label><input type="checkbox" data-kind="${kind}" data-t="${t}" ${it ? 'checked' : ''} ${dis}>${t}</label>${person}
-        <input type="number" inputmode="decimal" step="0.01" min="0" data-kind="${kind}" data-t="${t}" value="${it ? it.amount : ''}" placeholder="0" ${it && !locked ? '' : 'disabled'} aria-label="${t}金额">${bank}</div>`;
+      const ex = kind === 'expenses' && EXTRA_FIELD[t];
+      // 以前的数据维护费也写在介绍人里，这里当备注显示
+      const xv = ex === 'person' ? (it && it.person) || '' : ex === 'memo' ? (it && (it.memo || it.person)) || '' : '';
+      const extra = ex ? `<input class="person" data-x2="${t}" value="${esc(xv)}" placeholder="${ex === 'person' ? '介绍人名字' : '备注'}" ${it && !locked ? '' : 'disabled'} aria-label="${t}的${ex === 'person' ? '介绍人' : '备注'}">` : '';
+      const payers = names.concat(it && it.paid_by && !names.includes(it.paid_by) ? [it.paid_by] : []);
+      const paid = kind === 'expenses' ? `<select class="paid" data-paid="${t}" ${it && !locked ? '' : 'disabled'} ${it ? '' : 'hidden'} aria-label="${t}是谁付的" style="grid-column:1/-1">
+          <option value="">这笔钱已经付清了</option>${payers.map((n) => `<option value="${esc(n)}" ${it && it.paid_by === n ? 'selected' : ''}>${esc(n)}先垫付的，结算时还给 TA</option>`).join('')}</select>` : '';
+      return `<div class="money-row${ex ? ' with-person' : ''}"><label><input type="checkbox" data-kind="${kind}" data-t="${t}" ${it ? 'checked' : ''} ${dis}>${t}</label>${extra}
+        <input type="text" class="amt" inputmode="decimal" autocomplete="off" data-kind="${kind}" data-t="${t}" value="${it ? it.amount : ''}" placeholder="0" ${it && !locked ? '' : 'disabled'} aria-label="${t}金额">${bank}${paid}</div>`;
     }).join('');
     const chips = (field) => names.map((n) => `<button type="button" class="chip" data-f="${field}" data-n="${esc(n)}" aria-pressed="${d[field].includes(n)}" ${dis}>${esc(n)}</button>`).join('');
     const sheet = openSheet(`
@@ -257,7 +266,7 @@
         </div>
         <div class="card"><h3>收入（勾选这一单有的）</h3><div id="income-rows"></div></div>
         <div class="card"><h3>这一单的支出</h3><div id="expense-rows"></div>
-          <div class="small muted" style="margin-top:6px">房东介绍费和房东维护费的介绍人是同一个，写一个另一个自动填上；客户那边也一样。</div></div>
+          <div class="small muted" style="margin-top:6px">介绍费写介绍人名字，维护费写备注（例如请吃饭）。勾选后下面可以选“谁先垫付的”：业务员自己先掏钱、店里还没还的，选那个人，结算时这笔钱会加到 TA 的钱里。</div></div>
         <div class="card stack" id="listing-box"><h3>房源方业务员（可多选）</h3><div class="chips">${chips('listing_agents')}</div></div>
         <div class="card stack"><h3>客户方业务员（可多选）</h3><div class="chips">${chips('client_agents')}</div></div>
         <label class="field">备注<textarea id="f-note" rows="2" ${dis}>${esc(d.note)}</textarea></label>
@@ -277,13 +286,15 @@
       d.owner_name = d.type === '新房' ? '' : $('#f-owner', sheet).value.trim(); d.customer_name = $('#f-cust', sheet).value.trim();
       ['incomes', 'expenses'].forEach((k) => {
         d[k] = [...sheet.querySelectorAll(`input[type=checkbox][data-kind=${k}]`)].filter((c) => c.checked).map((c) => {
-          const v = sheet.querySelector(`input[type=number][data-kind=${k}][data-t="${c.dataset.t}"]`).value;
+          const v = sheet.querySelector(`input.amt[data-kind=${k}][data-t="${c.dataset.t}"]`).value;
           const it = { type: c.dataset.t, amount: Number(v || 0) };
           const b = c.dataset.t === '银行返点' && sheet.querySelector('input[data-bank]');
           if (b && b.value.trim()) it.bank = b.value.trim();
-          const side = k === 'expenses' && PERSON_SIDE[c.dataset.t];
-          const pv = side && sheet.querySelector(`input[data-pt="${c.dataset.t}"]`).value.trim();
-          if (pv) it.person = pv;
+          const ex = k === 'expenses' && EXTRA_FIELD[c.dataset.t];
+          const xv = ex && sheet.querySelector(`input[data-x2="${c.dataset.t}"]`).value.trim();
+          if (xv) it[ex] = xv;
+          const pb = k === 'expenses' && sheet.querySelector(`select[data-paid="${c.dataset.t}"]`).value;
+          if (pb) it.paid_by = pb;
           return it;
         });
       });
@@ -296,12 +307,20 @@
       $('#preview', sheet).innerHTML = breakdownHTML(view);
     }
     sheet.addEventListener('input', (e) => {
-      // 同一边（房东 / 客户）的介绍费和维护费共用一个介绍人
-      if (e.target.dataset.person) sheet.querySelectorAll(`input[data-person=${e.target.dataset.person}]`).forEach((x) => { if (x !== e.target) x.value = e.target.value; });
+      // 金额只留数字和一个小数点
+      if (e.target.classList.contains('amt')) { const v = e.target.value.replace(/[。，,]/g, '.').replace(/[^\d.]/g, '').replace(/\.(?=.*\.)/g, ''); if (v !== e.target.value) e.target.value = v; }
       preview();
     });
     sheet.addEventListener('change', (e) => {
-      if (e.target.type === 'checkbox') { const a = sheet.querySelector(`input[type=number][data-kind=${e.target.dataset.kind}][data-t="${e.target.dataset.t}"]`); a.disabled = !e.target.checked; if (e.target.checked) a.focus(); else a.value = ''; const pi = sheet.querySelector(`input[data-pt="${e.target.dataset.t}"]`); if (pi) { pi.disabled = !e.target.checked; if (e.target.checked && !pi.value) { const sib = [...sheet.querySelectorAll(`input[data-person=${pi.dataset.person}]`)].find((x) => x.value); if (sib) pi.value = sib.value; } } if (e.target.dataset.t === '银行返点') { const bk = sheet.querySelector('input[data-bank]'); bk.disabled = !e.target.checked; if (!e.target.checked) bk.value = ''; } }
+      if (e.target.type === 'checkbox') {
+        const on = e.target.checked, t = e.target.dataset.t, k = e.target.dataset.kind;
+        const a = sheet.querySelector(`input.amt[data-kind=${k}][data-t="${t}"]`); a.disabled = !on; if (on) a.focus(); else a.value = '';
+        if (k === 'expenses') {
+          const xi = sheet.querySelector(`input[data-x2="${t}"]`); if (xi) { xi.disabled = !on; if (!on) xi.value = ''; }
+          const ps = sheet.querySelector(`select[data-paid="${t}"]`); if (ps) { ps.disabled = !on; ps.hidden = !on; if (!on) ps.value = ''; }
+        }
+        if (t === '银行返点') { const bk = sheet.querySelector('input[data-bank]'); bk.disabled = !on; if (!on) bk.value = ''; }
+      }
       preview();
     });
     sheet.querySelectorAll('.seg button').forEach((b) => b.onclick = () => {
@@ -586,8 +605,8 @@
               <span class="bd-key">纯利润</span><span class="num bd-key">${f(t.net - t.maint)}</span></div>
             ${internal ? `<div class="bd-group"><span>店面维护成本</span><span class="num">${f(t.maint)}</span><span>房源方、客户方里店面的一半</span><span class="num">${f(t.store - t.maint)}</span>
               <span class="bd-key">店面合计</span><span class="num bd-key">${f(t.store)}</span></div>` : ''}
-            <div class="bd-group"><span class="bd-key" style="border:0;padding:0">业务员合计</span><span class="num bd-key" style="border:0;padding:0">${f(agentsTotal)}</span></div>
-            ${internal ? `<div class="bd-group"><span class="small muted" style="grid-column:1/-1">核对：店面合计 + 业务员合计 = 总账</span><span>${f(t.store)} + ${f(agentsTotal)}</span><span class="num">${f(t.store + agentsTotal)}</span></div>` : ''}
+            <div class="bd-group">${t.reimb ? `<span>业务员分成</span><span class="num">${f(agentsTotal - t.reimb)}</span><span>加：还业务员垫付的钱</span><span class="num">${f(t.reimb)}</span>` : ''}<span class="bd-key" style="border:0;padding:0">业务员合计</span><span class="num bd-key" style="border:0;padding:0">${f(agentsTotal)}</span></div>
+            ${internal ? `<div class="bd-group"><span class="small muted" style="grid-column:1/-1">核对：店面合计 + 业务员分成 = 总账</span><span>${f(t.store)} + ${f(agentsTotal - t.reimb)}</span><span class="num">${f(t.store + agentsTotal - t.reimb)}</span></div>` : ''}
           </div>`}
           <h3>${single ? '每人应得' : '二、每人应得'}</h3>
           <div class="tablewrap"><table><thead><tr><th>姓名</th><th class="r">应得（元）</th>${single ? '<th>确认</th>' : '<th>单数</th>'}</tr></thead><tbody>
@@ -602,7 +621,7 @@
           <h3>四、每一单的详细记录</h3>
           ${deals.map((d) => dealDetail(d, !internal, false)).join('')}`}
           ${single && d0.status !== 'locked' ? `<div class="notice info">请相关业务员核对后，打开确认链接点“确认无误”：${esc(CONFIRM_URL())}</div>` : ''}
-          <div class="small muted">分账规则：每单总账 = 收入 − 支出；扣 10% 店面维护成本后是纯利润（新房不扣，总账就是纯利润）；纯利润按房源方 20%、客户方 80% 分（新房全部算客户方）；每一块店面和业务员各一半，业务员那一半由这一单的业务员平分。除不尽的零头归业务员。</div>
+          <div class="small muted">分账规则：每单总账 = 收入 − 支出；扣 10% 店面维护成本后是纯利润（新房不扣，总账就是纯利润）；纯利润按房源方 20%、客户方 80% 分（新房全部算客户方）；每一块店面和业务员各一半，业务员那一半由这一单的业务员平分。除不尽的零头归业务员。业务员先垫付的支出，结算时加回给垫付的人。</div>
           <div class="small muted">生成时间：${new Date().toLocaleString('zh-CN')}</div>
         </div>
       </div>
