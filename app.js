@@ -100,7 +100,7 @@
         <span class="bd-key">总账（收入 − 支出）</span><span class="num bd-key">${f(r.net)}</span></div>
       <div class="bd-group"><span class="bd-title">二、纯利润</span>
         <span>总账</span><span class="num">${f(r.net)}</span>
-        ${r.rate ? `<span>减：店面维护成本 ${r.rate}%</span><span class="num">-${f(r.maint)}</span>` : '<span class="sub" style="grid-column:1/-1">新房不扣店面维护成本，总账就是纯利润</span>'}
+        ${r.rate ? `<span>减：店面维护成本 ${r.rate}%</span><span class="num">-${f(r.maint)}</span>${r.otherIncome || r.expense ? `<span class="sub" style="grid-column:1/-1">只扣佣金部分：（佣金 ${f(r.commission)}${r.expense ? ' − 支出 ' + f(r.expense) : ''}）× ${r.rate}%${r.otherIncome ? '，返点等其他收入 ' + f(r.otherIncome) + ' 不扣' : ''}</span>` : ''}` : '<span class="sub" style="grid-column:1/-1">新房不扣店面维护成本，总账就是纯利润</span>'}
         <span class="bd-key">纯利润</span><span class="num bd-key">${f(r.rest)}</span></div>
       ${d.type === '新房' ? block('三、客户方 100%（新房，没有房源方）', r.clientBlock, r.client, d.client_agents)
         : block('三、房源方 20%', r.listingBlock, r.listing, d.listing_agents) + block('四、客户方 80%', r.clientBlock, r.client, d.client_agents)}
@@ -641,7 +641,7 @@
             ${body || '<tr><td colspan="6" class="muted">这段时间没有单子</td></tr>'}
             ${tr('合计', tot, true)}
           </tbody></table></div>
-          <div class="small muted">店面合计 = 每单 10% 维护成本（新房不扣）+ 房源方和客户方里店面的一半。这段时间收入 ${f(tot.income)}，支出 ${f(tot.expense)}。</div>
+          <div class="small muted">店面合计 = 每单佣金部分的 10% 维护成本（返点不扣，新房不扣）+ 房源方和客户方里店面的一半。这段时间收入 ${f(tot.income)}，支出 ${f(tot.expense)}。</div>
         </div>
       </div>
       <div class="sheet-actions"><button id="iclose" class="btn-block">返回</button></div>`, '店面收入');
@@ -676,7 +676,7 @@
           <div class="bd">
             <div class="bd-group"><span>总收入</span><span class="num">${f(t.income)}</span><span>总支出</span><span class="num">-${f(t.expense)}</span>
               <span class="bd-key">总账（收入 − 支出）</span><span class="num bd-key">${f(t.net)}</span></div>
-            <div class="bd-group"><span>减：店面维护成本（新房不扣）</span><span class="num">-${f(t.maint)}</span>
+            <div class="bd-group"><span>减：店面维护成本（只扣佣金部分，新房不扣）</span><span class="num">-${f(t.maint)}</span>
               <span class="bd-key">纯利润</span><span class="num bd-key">${f(t.net - t.maint)}</span></div>
             ${internal ? `<div class="bd-group"><span>店面维护成本</span><span class="num">${f(t.maint)}</span><span>房源方、客户方里店面的一半</span><span class="num">${f(t.store - t.maint)}</span>
               <span class="bd-key">店面合计</span><span class="num bd-key">${f(t.store)}</span></div>` : ''}
@@ -696,7 +696,7 @@
           <h3>四、每一单的详细记录</h3>
           ${deals.map((d) => dealDetail(d, !internal, false)).join('')}`}
           ${single && d0.status !== 'locked' ? `<div class="notice info">请相关业务员核对后，打开确认链接点“确认无误”：${esc(CONFIRM_URL())}</div>` : ''}
-          <div class="small muted">分账规则：每单总账 = 收入 − 支出；扣 10% 店面维护成本后是纯利润（新房不扣，总账就是纯利润）；纯利润按房源方 20%、客户方 80% 分（新房全部算客户方）；每一块店面和业务员各一半，业务员那一半由这一单的业务员平分。除不尽的零头归业务员。业务员先垫付的支出，结算时加回给垫付的人。</div>
+          <div class="small muted">分账规则：每单总账 = 收入 − 支出；再扣店面维护成本是纯利润（只扣佣金部分：（佣金 − 支出）× 10%，返点等其他收入不扣；新房不扣）；纯利润按房源方 20%、客户方 80% 分（新房全部算客户方）；每一块店面和业务员各一半，业务员那一半由这一单的业务员平分。除不尽的零头归业务员。业务员先垫付的支出，结算时加回给垫付的人。</div>
           <div class="small muted">生成时间：${new Date().toLocaleString('zh-CN')}</div>
         </div>
       </div>

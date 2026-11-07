@@ -53,7 +53,7 @@
           ${d.incomes.map((i) => `<span class="sub">${esc(i.type + (i.bank ? '（' + i.bank + '）' : '') + (i.person ? '（' + i.person + '）' : ''))}</span><span class="num sub">${C.fmt(C.toFen(i.amount))}</span>`).join('')}
           ${d.expenses.map((i) => `<span class="sub">减：${esc(i.type + (i.person ? '（' + i.person + '）' : '') + (i.memo ? '（' + i.memo + '）' : '') + (i.paid_by ? '（' + i.paid_by + '垫付）' : ''))}</span><span class="num sub">-${C.fmt(C.toFen(i.amount))}</span>`).join('')}
           <span class="bd-key">总账</span><span class="num bd-key">${C.fmt(r.net)}</span></div>
-        <div class="bd-group">${r.rate ? `<span>减：店面维护 ${r.rate}%</span><span class="num">-${C.fmt(r.maint)}</span>` : '<span class="sub" style="grid-column:1/-1">新房不扣店面维护</span>'}
+        <div class="bd-group">${r.rate ? `<span>减：店面维护 ${r.rate}%</span><span class="num">-${C.fmt(r.maint)}</span>${r.otherIncome || r.expense ? `<span class="sub" style="grid-column:1/-1">只扣佣金部分：（佣金 ${C.fmt(r.commission)}${r.expense ? ' − 支出 ' + C.fmt(r.expense) : ''}）× ${r.rate}%${r.otherIncome ? '，返点 ' + C.fmt(r.otherIncome) + ' 不扣' : ''}</span>` : ''}` : '<span class="sub" style="grid-column:1/-1">新房不扣店面维护</span>'}
           <span class="bd-key">纯利润</span><span class="num bd-key">${C.fmt(r.rest)}</span></div>
         <div class="bd-group">
           ${d.type !== '新房' && d.listing_agents.includes(name) ? `<span>房源方 20% 的业务员一半${partners(d.listing_agents)}</span><span class="num">${C.fmt(r.listingBlock - r.listing.store)}</span>` : ''}
@@ -103,7 +103,7 @@
       </div>
       <h2>已结算</h2>
       ${stlHTML || '<div class="card muted">还没有结算过。</div>'}
-      <div class="small muted">规则：每单收入减支出是总账，扣 10% 店面维护后是纯利润（新房不扣）；纯利润房源方 20%、客户方 80%（新房全算客户方）；每一块业务员拿一半，由这一单的业务员平分。</div>
+      <div class="small muted">规则：每单收入减支出是总账，再扣店面维护是纯利润（只扣佣金部分的 10%，返点不扣；新房不扣）；纯利润房源方 20%、客户方 80%（新房全算客户方）；每一块业务员拿一半，由这一单的业务员平分。</div>
     </div>`;
     bindDemo();
     app.querySelectorAll('[data-ok]').forEach((b) => b.onclick = async () => {

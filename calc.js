@@ -1,7 +1,7 @@
 // 分账算法（所有金额用“分”为单位的整数计算，避免小数误差）
 // 规则：
 //   每一单：净额 = 收入合计 − 支出合计
-//   店面维护成本 = 净额 × 10%（新房没有这一项）
+//   店面维护成本 = （佣金 − 支出）× 10%，银行返点等其他收入不扣（新房没有这一项）
 //   剩余 = 净额 − 店面维护成本
 //   二手/租房：房源方 20%，客户方 80%；新房：没有房源方，100% 客户方
 //   每一块：店面拿一半，业务员一半由这一块的业务员平分
@@ -18,6 +18,8 @@
     '新房': ['客户介绍费', '客户维护费', '客户返点', '税费', '其他支出'],
   };
   const MAINT_RATE = { '二手买卖': 10, '租房': 10, '新房': 0 };
+  // 只有佣金扣店面维护成本；银行返点、装修返点、垫资返点、其他收入都不扣
+  const COMMISSION_TYPES = ['卖房房东佣金', '卖房客户佣金', '租房佣金', '开发商佣金'];
   const DEAL_TYPES = ['二手买卖', '租房', '新房'];
   // 每种房屋类型对应的佣金；返点和其他收入所有类型都可能有
   const COMMON_INCOME = ['银行返点', '装修返点', '垫资返点', '其他收入'];
@@ -56,7 +58,10 @@
     const expense = sum(deal.expenses);
     const net = income - expense;
     const rate = MAINT_RATE[deal.type] == null ? 10 : MAINT_RATE[deal.type];
-    const maint = Math.floor(net * rate / 100);
+    const commission = sum((deal.incomes || []).filter((i) => COMMISSION_TYPES.includes(i.type)));
+    const otherIncome = income - commission;
+    const maintBase = Math.max(0, commission - expense);     // 佣金减去支出后的部分才扣 10%
+    const maint = Math.floor(maintBase * rate / 100);
     const rest = net - maint;
     const isNew = deal.type === '新房';
     const listingBlock = isNew ? 0 : Math.floor(rest * 20 / 100);
@@ -80,7 +85,7 @@
     if (net < 0) warnings.push('这一单支出大于收入');
     const inDeal = [...(isNew ? [] : deal.listing_agents || []), ...(deal.client_agents || [])];
     Object.keys(reimb).forEach((n) => { if (!inDeal.includes(n)) warnings.push(`${n}垫付了钱，但不是这一单的业务员，结算单上不会显示，请把垫付人改成这一单的业务员`); });
-    return { income, expense, net, maint, rate, rest, listingBlock, clientBlock, listing: L, client: C, store, people, share, reimb, reimbTotal, warnings };
+    return { income, expense, net, commission, otherIncome, maintBase, maint, rate, rest, listingBlock, clientBlock, listing: L, client: C, store, people, share, reimb, reimbTotal, warnings };
   }
 
   // 汇总一期
@@ -96,6 +101,6 @@
     return { rows, totals };
   }
 
-  const api = { INCOME_TYPES, INCOME_BY_TYPE, EXPENSE_TYPES, EXPENSE_BY_TYPE, MAINT_RATE, DEAL_TYPES, STORE, toFen, fmt, calcDeal, calcPeriod };
+  const api = { COMMISSION_TYPES, INCOME_TYPES, INCOME_BY_TYPE, EXPENSE_TYPES, EXPENSE_BY_TYPE, MAINT_RATE, DEAL_TYPES, STORE, toFen, fmt, calcDeal, calcPeriod };
   if (typeof module !== 'undefined') module.exports = api; else root.Calc = api;
 })(this);
