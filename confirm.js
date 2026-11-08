@@ -288,11 +288,22 @@
     const mineOf = (d) => C.calcDeal(d).people[name] || 0;
     const sumOf = (list) => list.reduce((a, x) => a + mineOf(x.deal), 0);
 
+    // 客户信息只存一份：客户方有几位业务员时，谁先确认谁填，填好了别人能看到是谁填的
+    const custTodo = (d) => {
+      const filled = d.customer_name && (d.customer_phone || '').replace(/\D/g, '').length >= 7;
+      const others = d.client_agents.filter((n) => n !== name);
+      const by = d.customer_by && d.customer_by !== name ? (d.customer_by === '店面' ? '店面' : d.customer_by) : '';
+      const when = d.customer_at ? new Date(d.customer_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      const head = filled
+        ? `<b>✓ 客户信息${by ? '已由 ' + esc(by) + ' 填好' : '已经填好'}</b>${when ? `<span class="small muted">${esc(when)}</span>` : ''}<span class="small">看一下没问题，直接点“确认无误”就行。填错了可以在这里改。</span>`
+        : `<b>您是客户方业务员，请补全客户信息（必须填，店里留存）</b>${others.length ? `<span class="small">这一单客户方还有 ${esc(others.join('、'))}。客户信息只要填一次：谁先确认谁来填，填好了大家都看得到是谁填的。</span>` : ''}`;
+      return `<div class="todo-card stack" style="gap:8px">${head}
+          <span class="small">客户（名字、电话）</span><div class="oline nodel"><input data-cn="${d.id}" data-orig="${esc(d.customer_name || '')}" value="${esc(d.customer_name || '')}" placeholder="客户名字" aria-label="客户名字"><input data-cp="${d.id}" data-orig="${esc(d.customer_phone || '')}" value="${esc(d.customer_phone || '')}" inputmode="tel" placeholder="手机号" aria-label="客户电话"><button type="button" class="ocall" data-call aria-label="拨打这个电话">📞</button></div></div>`;
+    };
     const pendingHTML = pending.map((x) => {
       const d = x.deal, c = x.confirmation;
       return `<div class="stack" style="gap:8px">${d.reopen_count ? `<div class="notice">店面改过这一单${d.reopen_note ? '：' + esc(d.reopen_note) : ''}。请重新看一下，没问题再确认。</div>` : ''}${dealCard(d, name).html}
-        ${d.client_agents.includes(name) && !d.parent_id ? `<div class="todo-card stack" style="gap:8px"><b>您是客户方业务员，请补全客户信息（必须填，店里留存）</b>
-          <span class="small">客户（名字、电话）</span><div class="oline nodel"><input data-cn="${d.id}" value="${esc(d.customer_name || '')}" placeholder="客户名字" aria-label="客户名字"><input data-cp="${d.id}" value="${esc(d.customer_phone || '')}" inputmode="tel" placeholder="手机号" aria-label="客户电话"><button type="button" class="ocall" data-call aria-label="拨打这个电话">📞</button></div></div>` : ''}
+        ${d.client_agents.includes(name) && !d.parent_id ? custTodo(d) : ''}
         <button class="btn-primary btn-block" data-ok="${d.id}" style="font-size:20px;min-height:56px">确认无误</button>
         <div class="small muted">有疑问请直接在群里问，没问题再点确认。</div></div>`;
     }).join('<hr style="border:0;border-top:2px dashed var(--line);margin:6px 0">');
@@ -338,10 +349,18 @@
     });
     app.querySelectorAll('[data-ok]').forEach((b) => b.onclick = async () => {
       const id = b.dataset.ok, cn = app.querySelector(`[data-cn="${id}"]`), cp = app.querySelector(`[data-cp="${id}"]`);
+      if (cn && (!cn.value.trim() || cp.value.replace(/\D/g, '').length < 7)) {
+        // 页面打开得早，可能别的客户方业务员刚刚已经填好了：先看一下最新的
+        const fresh = await S.auntStatement().catch(() => null);
+        const fd = fresh && fresh.deals.find((x) => String(x.deal.id) === id);
+        if (fd && fd.deal.customer_name && fd.deal.customer_name !== cn.dataset.orig) { await statement(); err((fd.deal.customer_by || '别人') + ' 刚刚已经填好了客户信息，请看一下再确认'); return; }
+      }
       if (cn && !cn.value.trim()) { err('请先填客户名字'); cn.focus(); return; }
       if (cp && cp.value.replace(/\D/g, '').length < 7) { err('请先填客户电话'); cp.focus(); return; }
       if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = '确认后不能更改，再点一次'; return; }
-      try { await S.auntConfirm(Number(id), 'ok', '', cn ? { name: cn.value.trim(), phone: cp.value.trim() } : null); statement(); } catch (x) { err(x.message); }
+      // 只有自己改过才送上去，免得旧页面上的内容把别人刚填的盖掉
+      const changed = cn && (cn.value.trim() !== cn.dataset.orig || cp.value.trim() !== cp.dataset.orig);
+      try { await S.auntConfirm(Number(id), 'ok', '', changed ? { name: cn.value.trim(), phone: cp.value.trim() } : null); statement(); } catch (x) { err(x.message); }
     });
   }
 
@@ -349,4 +368,10 @@
     try { await (view === 'listings' ? listings() : statement()); } catch (e) { app.innerHTML = `<div class="wrap"><div class="notice err">打不开：${esc(e.message)}。请检查网络后再试。</div></div>`; }
   }
   start();
+  // 切回这个页面时自动刷新（别人刚填的、刚确认的都能看到）；正在填的时候不刷新
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || view === 'listings') return;
+    const typing = [...app.querySelectorAll('input[data-orig]')].some((i) => i.value.trim() !== i.dataset.orig) || (document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName));
+    if (!typing && !app.querySelector('[data-armed="1"]') && !document.querySelector('.sheet')) start();
+  });
 })();

@@ -169,7 +169,7 @@
           const cn = (cust && cust.name || '').trim() || d.customer_name || '', cp = (cust && cust.phone || '').trim() || d.customer_phone || '';
           if (!cn) return fail('您是客户方业务员，请先填客户名字');
           if (cp.replace(/\D/g, '').length < 7) return fail('您是客户方业务员，请先填客户电话');
-          d.customer_name = cn; d.customer_phone = cp;
+          if (cn !== d.customer_name || cp !== d.customer_phone) { d.customer_name = cn; d.customer_phone = cp; d.customer_by = a.name; d.customer_at = new Date().toISOString(); }
         }
         db.confirmations = db.confirmations.filter((c) => !(c.deal_id === dealId && c.agent_name === a.name));
         db.confirmations.push({ deal_id: dealId, agent_name: a.name, status, note: note || '', at: new Date().toISOString() });
@@ -217,12 +217,12 @@
         Object.assign(l, d); if ('photo' in x) setPhoto(id, x.photo, x.photo_thumb); save(); return id;
       },
       // 客户名字、电话：只有店面和这一单的客户方业务员能改，不影响分钱，不作废确认
-      async setCustomer(id, name, phone) { const d = deal(id); if (!d) return fail('找不到这一单'); d.customer_name = (name || '').trim(); d.customer_phone = (phone || '').trim(); save(); },
+      async setCustomer(id, name, phone) { const d = deal(id); if (!d) return fail('找不到这一单'); d.customer_name = (name || '').trim(); d.customer_phone = (phone || '').trim(); d.customer_by = '店面'; d.customer_at = new Date().toISOString(); save(); },
       async auntSetCustomer(id, name, phone) {
         const a = me(); if (!a) return fail('请重新登记');
         const d = deal(id); if (!d || !(d.client_agents || []).includes(a.name)) return fail('只有这一单的客户方业务员能改客户信息');
         if (!(name || '').trim()) return fail('请填客户名字'); if ((phone || '').replace(/\D/g, '').length < 7) return fail('请填正确的客户电话');
-        d.customer_name = name.trim(); d.customer_phone = phone.trim(); save();
+        d.customer_name = name.trim(); d.customer_phone = phone.trim(); d.customer_by = a.name; d.customer_at = new Date().toISOString(); save();
       },
       demoReset() { ls.del(KEY); ls.del(TOKEN_KEY); },
     };

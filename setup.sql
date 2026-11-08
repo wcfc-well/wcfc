@@ -265,12 +265,15 @@ begin
   select * into d from deals where id = p_deal for update;
   if not found or d.status <> 'confirming' then raise exception '这一单现在不能确认'; end if;
   if not (a.name = any(deal_people(d))) then raise exception '这一单没有您'; end if;
+  perform set_config('app.who', a.name, true);  -- 记下是谁填的客户信息
   if p_status = 'ok' and a.name = any(d.client_agents) and d.parent_id is null then  -- 补记的返点不用再填客户
     cn := coalesce(nullif(trim(p_cust_name), ''), d.customer_name);
     cp := coalesce(nullif(trim(p_cust_phone), ''), d.customer_phone);
     if coalesce(cn, '') = '' then raise exception '您是客户方业务员，请先填客户名字'; end if;
     if length(regexp_replace(coalesce(cp, ''), '\D', '', 'g')) < 7 then raise exception '您是客户方业务员，请先填客户电话'; end if;
-    update deals set customer_name = cn, customer_phone = cp where id = p_deal;
+    if cn is distinct from d.customer_name or cp is distinct from d.customer_phone then
+      update deals set customer_name = cn, customer_phone = cp where id = p_deal;
+    end if;
   end if;
   insert into confirmations (deal_id, agent_name, status, note, at) values (p_deal, a.name, p_status, coalesce(p_note, ''), now())
   on conflict (deal_id, agent_name) do update set status = excluded.status, note = excluded.note, at = now();
@@ -452,6 +455,7 @@ begin
   if not found or not (a.name = any(d.client_agents)) then raise exception '只有这一单的客户方业务员能改客户信息'; end if;
   if coalesce(trim(p_name), '') = '' then raise exception '请填客户名字'; end if;
   if length(regexp_replace(coalesce(p_phone, ''), '\D', '', 'g')) < 7 then raise exception '请填正确的客户电话'; end if;
+  perform set_config('app.who', a.name, true);
   update deals set customer_name = trim(p_name), customer_phone = trim(p_phone) where id = p_deal;
 end $$;
 revoke all on function aunt_set_customer(text, bigint, text, text) from public;
@@ -552,3 +556,18 @@ begin
     c := null; lid := null;
   end loop;
 end $$;
+
+-- ---------- 2026-11-08：记下客户信息是谁填的（客户方有几位业务员时，大家看得到谁已经填好了） ----------
+alter table deals add column if not exists customer_by text not null default '';
+alter table deals add column if not exists customer_at timestamptz;
+create or replace function deals_customer_by() returns trigger language plpgsql as $$
+begin
+  if (tg_op = 'INSERT' and (coalesce(new.customer_name, '') <> '' or coalesce(new.customer_phone, '') <> ''))
+     or (tg_op = 'UPDATE' and (new.customer_name is distinct from old.customer_name or new.customer_phone is distinct from old.customer_phone)) then
+    new.customer_by := coalesce(nullif(current_setting('app.who', true), ''), '店面');
+    new.customer_at := now();
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_deals_customer_by on deals;
+create trigger trg_deals_customer_by before insert or update on deals for each row execute function deals_customer_by();

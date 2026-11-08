@@ -474,7 +474,7 @@
           </div>
           <label class="field"><span id="price-l">成交价（万元）</span><input id="f-price" inputmode="decimal" autocomplete="off" value="${d.deal_price == null ? '' : esc(d.deal_price)}" placeholder="例如：168" ${dis}></label>
           <div class="phones small" id="f-owner-phones"></div>
-          <div class="phones small">${d.customer_phone ? `客户电话（业务员填的）：<a class="tel" href="tel:${esc(d.customer_phone.replace(/[^\d+]/g, ''))}">${esc(d.customer_name || '客户')} ${esc(d.customer_phone)} 📞</a>`
+          <div class="phones small">${d.customer_phone ? `客户电话（${d.customer_by ? esc(d.customer_by) + ' 填的' : '业务员填的'}）：<a class="tel" href="tel:${esc(d.customer_phone.replace(/[^\d+]/g, ''))}">${esc(d.customer_name || '客户')} ${esc(d.customer_phone)} 📞</a>`
             : '<span class="muted">客户电话：不用你填，客户方业务员确认时会补上，补好了会自动显示在这里</span>'}</div>
         </div>
         <div class="card"><h3>收入（勾选这一单有的）</h3><div id="income-rows"></div>
