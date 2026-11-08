@@ -859,7 +859,7 @@
             <div class="tile"><div class="small muted">总账</div><div class="v num">${f(tot.net)}</div></div>
             <div class="tile"><div class="small muted">店面一共得</div><div class="v num">${f(tot.store)}</div></div>
             <div class="tile"><div class="small muted">业务员一共得</div><div class="v num">${f(tot.agents)}</div></div>
-            <div class="tile"><div class="small muted">店面维护 10%</div><div class="v num">${f(tot.maint)}</div><div class="small muted">已算在“店面一共得”里</div></div>
+            <div class="tile"><div class="small muted">店面利润（不含 10% 维护）</div><div class="v num">${f(tot.store - tot.maint)}</div><div class="small muted">店面一共得 减去 10% 维护 ${f(tot.maint)}</div></div>
           </div>
           <div class="tablewrap"><table><thead><tr><th>月份</th><th class="r">单数</th><th class="r">总账</th><th class="r">维护成本</th><th class="r">店面合计</th><th class="r">业务员合计</th></tr></thead><tbody>
             ${body || '<tr><td colspan="6" class="muted">这段时间没有单子</td></tr>'}
