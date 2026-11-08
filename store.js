@@ -106,7 +106,7 @@
         if (old && old.status === 'locked') return fail('这一单大家已经确认锁定，不能再改');
         const status = send ? 'confirming' : 'draft';
         if (old && (!sameContent(old, d) || status === 'draft')) db.confirmations = db.confirmations.filter((c) => c.deal_id !== old.id);
-        const row = { deal_date: d.deal_date, type: d.type, title: d.title, owner_name: d.owner_name || '', partner: d.partner || '', customer_phone: d.customer_phone || '', customer_name: d.customer_name || '', incomes: clone(d.incomes), expenses: clone(d.expenses), listing_agents: d.listing_agents.slice(), client_agents: d.client_agents.slice(), note: d.note, status, listing_id: d.listing_id || null };
+        const row = { deal_date: d.deal_date, type: d.type, title: d.title, owner_name: d.owner_name || '', partner: d.partner || '', customer_phone: d.customer_phone || '', customer_name: d.customer_name || '', incomes: clone(d.incomes), expenses: clone(d.expenses), listing_agents: d.listing_agents.slice(), client_agents: d.client_agents.slice(), note: d.note, status, listing_id: d.listing_id || null, parent_id: d.parent_id || null };
         const oldL = old ? old.listing_id : null;
         let target;
         if (old) target = Object.assign(old, row); else { target = { ...row, id: ++db.seq, locked_at: null, settlement_id: null }; db.deals.push(target); }
@@ -162,7 +162,7 @@
         if (!a) return fail('请重新登记');
         const d = deal(dealId);
         if (!d || d.status !== 'confirming') return fail('这一单现在不能确认');
-        if (status === 'ok' && (d.client_agents || []).includes(a.name)) {
+        if (status === 'ok' && (d.client_agents || []).includes(a.name) && !d.parent_id) {
           const cn = (cust && cust.name || '').trim() || d.customer_name || '', cp = (cust && cust.phone || '').trim() || d.customer_phone || '';
           if (!cn) return fail('您是客户方业务员，请先填客户名字');
           if (cp.replace(/\D/g, '').length < 7) return fail('您是客户方业务员，请先填客户电话');
@@ -259,7 +259,7 @@
       setCode: (id, code) => q(sb.from('agents').update({ phone4: code, device_token: null, fail_count: 0 }).eq('id', id)),
       listDeals: () => q(sb.from('deals').select('*').order('deal_date', { ascending: false }).order('id', { ascending: false })),
       async saveDeal(d, send) {
-        const row = { deal_date: d.deal_date, type: d.type, title: d.title || '', owner_name: d.owner_name || '', partner: d.partner || '', customer_phone: d.customer_phone || '', customer_name: d.customer_name || '', incomes: d.incomes, expenses: d.expenses, listing_agents: d.listing_agents, client_agents: d.client_agents, note: d.note || '', status: send ? 'confirming' : 'draft', listing_id: d.listing_id || null };
+        const row = { deal_date: d.deal_date, type: d.type, title: d.title || '', owner_name: d.owner_name || '', partner: d.partner || '', customer_phone: d.customer_phone || '', customer_name: d.customer_name || '', incomes: d.incomes, expenses: d.expenses, listing_agents: d.listing_agents, client_agents: d.client_agents, note: d.note || '', status: send ? 'confirming' : 'draft', listing_id: d.listing_id || null, parent_id: d.parent_id || null };
         if (d.id) await q(sb.from('deals').update(row).eq('id', d.id)); else await q(sb.from('deals').insert(row));
         return true;
       },

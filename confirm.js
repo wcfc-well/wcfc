@@ -251,13 +251,14 @@
     return { mine, html: `<div class="card stack" style="gap:6px">
       <div class="row" style="gap:10px"><span class="tc tt-${{ '二手买卖': 'a', '租房': 'b', '新房': 'c', '合作': 'd' }[d.type] || 'a'}">${{ '二手买卖': '二手', '租房': '租房', '新房': '新房', '合作': '合作' }[d.type] || esc(d.type)}</span><b style="font-size:18px">${esc(d.title || '（没写房子）')}</b></div>
       <span class="muted small"><span class="num">${d.deal_date}</span>${[d.type === '合作' ? '合作中介：' + esc(d.partner || '—') : '', d.type !== '新房' && d.owner_name ? '房东：' + esc(d.owner_name) : '', d.customer_name ? '客户：' + esc(d.customer_name) : ''].filter(Boolean).map((x) => '　' + x).join('')}</span>
+      ${d.parent_id ? '<div class="small notice">这是之前那一单晚到账的返点，单独补记。原单不变，只要确认这一小笔。</div>' : ''}
       <div class="bd">
         <div class="bd-group">
           ${d.incomes.map((i) => `<span class="sub">${esc(i.type + (i.bank ? '（' + i.bank + '）' : '') + (i.person ? '（' + i.person + '）' : ''))}</span><span class="num sub">${C.fmt(C.toFen(i.amount))}</span>`).join('')}
           ${d.expenses.map((i) => `<span class="sub">减：${esc(i.type + (i.person ? '（' + i.person + '）' : '') + (i.memo ? '（' + i.memo + '）' : '') + (i.paid_by ? '（' + i.paid_by + '垫付）' : ''))}</span><span class="num sub">-${C.fmt(C.toFen(i.amount))}</span>`).join('')}
           ${r.isCoop ? `<span class="sub">减：合作中介拿一半</span><span class="num sub">-${C.fmt(r.partnerCut)}</span>` : ''}
           <span class="bd-key">总账</span><span class="num bd-key">${C.fmt(r.net)}</span></div>
-        <div class="bd-group">${r.rate ? `<span>减：店面维护 ${r.rate}%</span><span class="num">-${C.fmt(r.maint)}</span>${r.otherIncome || r.expense ? `<span class="sub" style="grid-column:1/-1">只扣佣金部分：（佣金 ${C.fmt(r.commission)}${r.expense ? ' − 支出 ' + C.fmt(r.expense) : ''}）× ${r.rate}%${r.otherIncome ? '，返点 ' + C.fmt(r.otherIncome) + ' 不扣' : ''}</span>` : ''}` : `<span class="sub" style="grid-column:1/-1">${r.isCoop ? '合作单不扣店面维护' : '新房不扣店面维护'}</span>`}
+        <div class="bd-group">${d.parent_id ? '<span class="sub" style="grid-column:1/-1">返点不扣店面维护</span>' : r.rate ? `<span>减：店面维护 ${r.rate}%</span><span class="num">-${C.fmt(r.maint)}</span>${r.otherIncome || r.expense ? `<span class="sub" style="grid-column:1/-1">只扣佣金部分：（佣金 ${C.fmt(r.commission)}${r.expense ? ' − 支出 ' + C.fmt(r.expense) : ''}）× ${r.rate}%${r.otherIncome ? '，返点 ' + C.fmt(r.otherIncome) + ' 不扣' : ''}</span>` : ''}` : `<span class="sub" style="grid-column:1/-1">${r.isCoop ? '合作单不扣店面维护' : '新房不扣店面维护'}</span>`}
           <span class="bd-key">纯利润</span><span class="num bd-key">${C.fmt(r.rest)}</span></div>
         <div class="bd-group">
           ${d.type !== '新房' && d.listing_agents.includes(name) ? `<span>房源方的业务员一半${partners(d.listing_agents)}${r.returns.listing.length ? '（含' + r.returns.listing.map((x) => x.type).join('、') + '）' : ''}</span><span class="num">${C.fmt(r.listingBlock - r.listing.store)}</span>` : ''}
@@ -281,13 +282,13 @@
     const pendingHTML = pending.map((x) => {
       const d = x.deal, c = x.confirmation;
       return `<div class="stack" style="gap:8px">${d.reopen_count ? `<div class="notice">店面改过这一单${d.reopen_note ? '：' + esc(d.reopen_note) : ''}。请重新看一下，没问题再确认。</div>` : ''}${dealCard(d, name).html}
-        ${d.client_agents.includes(name) ? `<div class="todo-card stack" style="gap:8px"><b>您是客户方业务员，请补全客户信息（必须填，店里留存）</b>
+        ${d.client_agents.includes(name) && !d.parent_id ? `<div class="todo-card stack" style="gap:8px"><b>您是客户方业务员，请补全客户信息（必须填，店里留存）</b>
           <span class="small">客户（名字、电话）</span><div class="oline nodel"><input data-cn="${d.id}" value="${esc(d.customer_name || '')}" placeholder="客户名字" aria-label="客户名字"><input data-cp="${d.id}" value="${esc(d.customer_phone || '')}" inputmode="tel" placeholder="手机号" aria-label="客户电话"><button type="button" class="ocall" data-call aria-label="拨打这个电话">📞</button></div></div>` : ''}
         <button class="btn-primary btn-block" data-ok="${d.id}" style="font-size:20px;min-height:56px">确认无误</button>
         <div class="small muted">有疑问请直接在群里问，没问题再点确认。</div></div>`;
     }).join('<hr style="border:0;border-top:2px dashed var(--line);margin:6px 0">');
     // 客户方业务员随时能改客户名字、电话（别人看不到这里）
-    const custBox = (d) => d.client_agents.includes(name) ? `<div class="card stack" style="gap:8px"><span class="small muted">客户（名字、电话）　只有客户方和店面能改</span>
+    const custBox = (d) => !d.parent_id && d.client_agents.includes(name) ? `<div class="card stack" style="gap:8px"><span class="small muted">客户（名字、电话）　只有客户方和店面能改</span>
       <div class="oline nodel" data-cdeal="${d.id}"><input data-cn value="${esc(d.customer_name || '')}" placeholder="客户名字" aria-label="客户名字"><input data-cp value="${esc(d.customer_phone || '')}" inputmode="tel" placeholder="手机号" aria-label="客户电话"><button type="button" class="ocall" data-call aria-label="拨打这个电话">📞</button></div>
       <button type="button" data-csave="${d.id}" style="align-self:flex-start">保存客户信息</button></div>` : '';
     // 每一单点开能看详细的账

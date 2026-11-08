@@ -117,7 +117,7 @@
         <span class="bd-key">总账（${r.isCoop ? '我们这一半 − 支出' : '收入 − 支出'}）</span><span class="num bd-key">${f(r.net)}</span></div>
       <div class="bd-group"><span class="bd-title">二、纯利润</span>
         <span>总账</span><span class="num">${f(r.net)}</span>
-        ${r.rate ? `<span>减：店面维护成本 ${r.rate}%</span><span class="num">-${f(r.maint)}</span>${r.otherIncome || r.expense ? `<span class="sub" style="grid-column:1/-1">只扣佣金部分：（佣金 ${f(r.commission)}${r.expense ? ' − 支出 ' + f(r.expense) : ''}）× ${r.rate}%${r.otherIncome ? '，返点等其他收入 ' + f(r.otherIncome) + ' 不扣' : ''}</span>` : ''}` : `<span class="sub" style="grid-column:1/-1">${r.isCoop ? '合作单不扣店面维护成本，总账就是纯利润' : '新房不扣店面维护成本，总账就是纯利润'}</span>`}
+        ${d.parent_id ? '<span class="sub" style="grid-column:1/-1">返点不扣店面维护</span>' : r.rate ? `<span>减：店面维护成本 ${r.rate}%</span><span class="num">-${f(r.maint)}</span>${r.otherIncome || r.expense ? `<span class="sub" style="grid-column:1/-1">只扣佣金部分：（佣金 ${f(r.commission)}${r.expense ? ' − 支出 ' + f(r.expense) : ''}）× ${r.rate}%${r.otherIncome ? '，返点等其他收入 ' + f(r.otherIncome) + ' 不扣' : ''}</span>` : ''}` : `<span class="sub" style="grid-column:1/-1">${r.isCoop ? '合作单不扣店面维护成本，总账就是纯利润' : '新房不扣店面维护成本，总账就是纯利润'}</span>`}
         <span class="bd-key">纯利润</span><span class="num bd-key">${f(r.rest)}</span>
         ${r.otherIncome && r.isCoop ? '<span class="sub" style="grid-column:1/-1">合作单的返点和其他收入不给合作中介、不扣 10%，和我们那一半佣金放在一起，店面一半、业务员一半</span>' : ''}${r.otherIncome && !r.isCoop ? `<span class="sub" style="grid-column:1/-1">佣金部分 ${f(r.profit)} 按${d.type === '新房' ? '客户方 100%' : '房源方 20%、客户方 80%'}分；返点不按比例，直接归一方：${d.type === '新房' ? '新房全部归客户方' : '银行、装修返点归客户方，垫资返点归房源方，其他收入看选的哪一方'}</span>` : ''}</div>
       ${r.isCoop ? block('三、店面和业务员分（合作单不分房源方、客户方）', r.clientBlock, r.client, d.client_agents, r.clientProfit, 100, r.returns.client, '佣金我们这一半 − 支出')
@@ -333,7 +333,79 @@
     sheet.innerHTML = html; document.body.appendChild(sheet); return sheet;
   }
 
+  // 补记晚到的返点：单独记一笔挂在原单下面。原单不动、不用重新确认，只有分这笔钱的业务员确认这一小笔
+  const ADDON_TYPES = ['银行返点', '装修返点', '垫资返点', '其他收入'];
+  function openAddon(parent, addon) {
+    const locked = addon && addon.status === 'locked';
+    const dis = locked ? 'disabled' : '';
+    const one = C.oneSide(parent.type);
+    const its = addon ? addon.incomes : [];
+    const sideName = (side) => side === 'listing' ? `房源方（${(parent.listing_agents || []).join('、') || '没选人'}）` : `${one ? '' : '客户方'}（${(parent.client_agents || []).join('、') || '没选人'}）`;
+    const row = (t) => { const it = its.find((x) => x.type === t);
+      const side = t === '其他收入' ? (it && it.side) || 'client' : C.RETURN_SIDE[t];
+      return `<div class="money-row"><label><input type="checkbox" data-at="${t}" ${it ? 'checked' : ''} ${dis}>${t}</label>
+        <input type="text" class="amt" inputmode="decimal" autocomplete="off" data-aa="${t}" value="${it ? it.amount : ''}" placeholder="0" ${dis} aria-label="${t}金额">
+        ${t === '银行返点' ? `<input class="bank" data-ab value="${esc(it && it.bank || '')}" placeholder="哪家银行，例如：农行" ${dis} aria-label="哪家银行" style="grid-column:1/-1">` : ''}
+        ${t === '其他收入' && !one ? `<select class="paid" data-aside ${dis} aria-label="其他收入跟谁分" style="grid-column:1/-1"><option value="client" ${side === 'client' ? 'selected' : ''}>跟客户方分</option><option value="listing" ${side === 'listing' ? 'selected' : ''}>跟房源方分</option></select>`
+          : `<div class="small muted" style="grid-column:1/-1">归${one ? '这一单的业务员' : ''}${sideName(one ? 'client' : side)}</div>`}</div>`; };
+    const p = addon ? progress(addon) : null;
+    const sheet = openSheet(`<div class="wrap stack">
+        <div class="row between"><h2>${addon ? '补记的返点' : '补记晚到的返点'}</h2>${typeTag(parent.type)}</div>
+        <div class="notice">原单：${esc(parent.deal_date)}　${esc(parent.title || '')}<br><span class="small">原单不动，也不用重新确认。这一笔单独算，只有分这笔钱的业务员确认一下。</span></div>
+        ${addon ? steps(addon) : ''}
+        ${addon ? '<button class="btn-primary btn-block" id="a-stmt">这一笔的结算单（发到群里）</button>' : ''}
+        ${addon && addon.status !== 'draft' ? `<div class="card stack" style="gap:6px"><h3>业务员确认情况</h3>${p.who.map((n) => { const c = p.cm[n]; return `<div class="row between"><span>${esc(n)}</span>${c && c.status === 'ok' ? '<span class="pill ok">已确认</span>' : '<span class="pill gray">还没确认</span>'}</div>`; }).join('')}</div>` : ''}
+        ${locked ? '<div class="notice">相关业务员都确认了，这一笔已锁定。</div>' : ''}
+        <div class="card stack">
+          <label class="field">到账日期<input type="date" id="a-date" value="${addon ? addon.deal_date : today()}" ${dis}></label>
+          <div class="stack" style="gap:8px">${ADDON_TYPES.map(row).join('')}</div>
+          <label class="field">备注<input id="a-note" value="${esc(addon ? addon.note || '' : '')}" placeholder="例如：农行返点 11 月到账" ${dis}></label>
+        </div>
+        <div id="a-prev"></div>
+      </div>
+      <div class="sheet-actions">
+        <button id="a-cancel">${locked ? '返回' : '取消'}</button>
+        ${addon && !locked ? '<button id="a-del" class="btn-danger">删除</button>' : ''}
+        ${locked ? '' : `<button id="a-save" class="btn-primary">${addon ? '保存' : '保存，发给业务员确认'}</button>`}
+      </div>`, '补记返点');
+    const close = () => sheet.remove();
+    const collect = () => {
+      const incomes = ADDON_TYPES.filter((t) => $(`[data-at="${t}"]`, sheet).checked).map((t) => {
+        const it = { type: t, amount: Number($(`[data-aa="${t}"]`, sheet).value.replace(/[^\d.]/g, '') || 0) };
+        if (t === '银行返点') { const b = $('[data-ab]', sheet).value.trim(); if (b) it.bank = b; }
+        if (t === '其他收入' && !one) it.side = $('[data-aside]', sheet).value;
+        return it; });
+      const sides = new Set(incomes.map((i) => C.sideOf(i, one)));
+      return { ...(addon || {}), parent_id: parent.id, type: parent.type, title: '补记返点 · ' + (parent.title || ''), owner_name: parent.owner_name || '', partner: parent.partner || '',
+        customer_name: parent.customer_name || '', customer_phone: parent.customer_phone || '', listing_id: null, expenses: [],
+        incomes, deal_date: $('#a-date', sheet).value, note: $('#a-note', sheet).value.trim(),
+        listing_agents: !one && sides.has('listing') ? (parent.listing_agents || []).slice() : [], client_agents: sides.has('client') ? (parent.client_agents || []).slice() : [] };
+    };
+    const preview = () => {
+      if (locked) return;
+      const d = collect(); const r = C.calcDeal(d);
+      $('#a-prev', sheet).innerHTML = d.incomes.length ? `<div class="card stack" style="gap:4px"><h3>这一笔怎么分</h3>
+        ${Object.entries(r.share).map(([n, v]) => `<div class="row between"><span>${esc(n)}</span><b class="num">${f(v)}</b></div>`).join('')}
+        <div class="row between muted"><span>店面</span><span class="num">${f(r.store)}</span></div></div>` : '';
+    };
+    sheet.querySelectorAll('[data-at]').forEach((c) => c.onchange = () => { if (c.checked) $(`[data-aa="${c.dataset.at}"]`, sheet).focus(); preview(); });
+    sheet.querySelectorAll('[data-aa]').forEach((i) => i.oninput = () => { if (i.value) $(`[data-at="${i.dataset.aa}"]`, sheet).checked = true; preview(); });
+    if ($('[data-aside]', sheet)) $('[data-aside]', sheet).onchange = preview;
+    preview();
+    $('#a-cancel', sheet).onclick = close;
+    if ($('#a-stmt', sheet)) $('#a-stmt', sheet).onclick = () => openStatement({ title: '单笔结算单', sub: `${addon.deal_date}　${addon.title || ''}`, deals: [addon] });
+    if ($('#a-del', sheet)) twice($('#a-del', sheet), '再点一次删除', async () => { await run(() => S.deleteDeal(addon.id)); close(); toast('已删除'); await reload(); });
+    if ($('#a-save', sheet)) $('#a-save', sheet).onclick = async () => {
+      const d = collect();
+      if (!d.deal_date) return toast('请选到账日期');
+      if (!d.incomes.length || d.incomes.some((i) => !i.amount)) return toast('请勾选到账的返点，并填上金额');
+      if (!d.listing_agents.length && !d.client_agents.length) return toast('原单没有选这一方的业务员，没法分');
+      await run(() => S.saveDeal(d, true)); close(); toast('已保存，打开这一笔可以生成结算单发到群里'); await reload();
+    };
+  }
+
   function openDeal(deal, prefill) {
+    if (deal && deal.parent_id) { const par = state.deals.find((x) => x.id === deal.parent_id); if (par) return openAddon(par, deal); }
     const d = deal ? JSON.parse(JSON.stringify(deal)) : { deal_date: today(), type: '二手买卖', title: '', owner_name: '', customer_name: '', incomes: [], expenses: [], listing_agents: [], client_agents: [], note: '', ...(prefill || {}) };
     const locked = deal && deal.status === 'locked';
     const p = deal ? progress(deal) : null;
@@ -374,6 +446,9 @@
         <div class="row between"><h2>${deal ? '这一单' : '记一单'}</h2>${deal ? typeTag(deal.type) : ''}</div>
         ${deal ? steps(deal) : ''}
         ${deal ? '<button class="btn-primary btn-block" id="s-stmt">这一单的结算单（发到群里）</button>' : ''}
+        ${deal && deal.status !== 'draft' ? `<div class="card stack" style="gap:6px"><div class="row between"><b>晚到的返点</b><button id="s-addon">＋ 补记返点</button></div>
+          ${state.deals.filter((x) => x.parent_id === deal.id).map((x) => `<button class="linkish" data-addon="${x.id}" style="text-align:left">${esc(x.deal_date)}　${x.incomes.map((i) => esc(i.type) + ' ' + f(C.toFen(i.amount))).join('、')}　<span class="muted">${{ confirming: '等确认', locked: x.settlement_id ? '已结算' : '已确认', draft: '草稿' }[x.status] || ''}</span></button>`).join('')
+            || '<div class="small muted">银行返点这类钱晚到账，到了以后点“补记返点”。原单不用重新确认。</div>'}</div>` : ''}
         ${locked ? `<div class="notice err stack" style="gap:8px"><div>相关业务员都已确认，这一单已锁定，不能直接改。${deal.settlement_id ? '已经结算过了。' : '等结算时再算钱。'}</div>
           ${deal.settlement_id ? '<div class="small">发现算错了？先到“结算”页的结算记录里撤销那次结算，再回来点“撤回重改”。</div>'
             : `<div class="stack" style="gap:6px"><b>发现算错了？</b><input id="re-why" placeholder="写一下哪里错了，例如：佣金少写了 1000" aria-label="哪里错了">
@@ -506,6 +581,8 @@
       b.setAttribute('aria-pressed', i < 0); preview();
     });
     $('#s-cancel', sheet).onclick = close;
+    if ($('#s-addon', sheet)) $('#s-addon', sheet).onclick = () => { close(); openAddon(deal, null); };
+    sheet.querySelectorAll('[data-addon]').forEach((b) => b.onclick = () => { close(); openAddon(deal, state.deals.find((x) => String(x.id) === b.dataset.addon)); });
     if ($('#s-stmt', sheet)) $('#s-stmt', sheet).onclick = () => openStatement({ title: '单笔结算单', sub: `${deal.deal_date}　${deal.title || ''}`, deals: [deal] });
     if ($('#s-reopen', sheet)) twice($('#s-reopen', sheet), '确定撤回？再点一次', async () => {
       const why = $('#re-why', sheet).value.trim();
