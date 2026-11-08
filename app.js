@@ -151,14 +151,31 @@
       return { canvas, breaks };
     } finally { sheet.classList.remove('capturing'); }
   }
-  async function deliver(blob, fname, title) {
-    const file = new File([blob], fname, { type: blob.type });
-    if (!WECHAT && MOBILE && navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title }); return true; } catch (e) { if (e.name === 'AbortError') return true; }
-    }
-    if (WECHAT) return false;
+  function download(blob, fname) {
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = fname;
-    document.body.appendChild(a); a.click(); setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 60000); return true;
+    document.body.appendChild(a); a.click(); setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 60000);
+  }
+  // 手机上：先生成好，再弹一个框让人点“保存 / 发送”。
+  // 安卓要求分享和下载必须是手指刚点下去触发的，生成要几秒，所以不能生成完直接弹。
+  function offer(blob, fname, title, imgUrl) {
+    const file = new File([blob], fname, { type: blob.type });
+    const canShare = !WECHAT && navigator.canShare && navigator.canShare({ files: [file] });
+    const isImg = blob.type.startsWith('image/');
+    const ov = document.createElement('div'); ov.className = 'img-ov';
+    const tip = WECHAT ? (isImg ? '<b>长按下面的图片</b>，选“保存图片”或“发送给朋友”。' : '')
+      : isImg ? '点下面“保存 / 发送”，或者长按图片保存。' : `${esc(fname)} 已经生成好了，点下面“保存 / 发送”。`;
+    ov.innerHTML = `<div class="img-box"><div style="font-size:17px">${tip}</div>
+      ${isImg ? `<img src="${imgUrl}" alt="${esc(title)}">` : ''}
+      <div class="row" style="gap:8px">${WECHAT ? '' : '<button class="btn-primary grow" data-save>保存 / 发送</button>'}<button class="grow" data-close>关闭</button></div></div>`;
+    ov.querySelector('[data-close]').onclick = () => ov.remove();
+    const sv = ov.querySelector('[data-save]');
+    if (sv) sv.onclick = async () => {
+      if (canShare) {
+        try { await navigator.share({ files: [file], title }); return; } catch (e) { if (e.name === 'AbortError') return; }
+      }
+      download(blob, fname); toast('已保存到手机的“下载”文件夹');
+    };
+    document.body.appendChild(ov);
   }
   function busy(btn, fn) {
     return async () => { const old = btn.textContent; btn.textContent = '正在生成…'; btn.disabled = true;
@@ -184,20 +201,14 @@
         pdf.addImage(part.toDataURL('image/jpeg', 0.92), 'JPEG', M, M, W, (end - y) * W / canvas.width);
         y = end;
       }
-      await deliver(pdf.output('blob'), fileName(name, 'pdf'), name);
+      const blob = pdf.output('blob'), fname = fileName(name, 'pdf');
+      if (MOBILE) offer(blob, fname, name); else { download(blob, fname); toast('PDF 已下载'); }
     });
     b('img').onclick = busy(b('img'), async () => {
       const { canvas } = await capture(sheet);
       const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/png'));
       const fname = fileName(name, 'png');
-      if (!WECHAT && MOBILE && await deliver(blob, fname, name)) return;
-      if (!MOBILE) { await deliver(blob, fname, name); return toast('图片已下载'); }
-      // 微信里：弹出图片，长按保存
-      const ov = document.createElement('div'); ov.className = 'img-ov';
-      ov.innerHTML = `<div class="img-box"><div style="font-size:18px"><b>长按下面的图片</b>，选“保存图片”或“发送给朋友”。</div>
-        <img src="${canvas.toDataURL('image/png')}" alt="${esc(name)}"><button data-close>关闭</button></div>`;
-      ov.querySelector('[data-close]').onclick = () => ov.remove();
-      document.body.appendChild(ov);
+      if (MOBILE) offer(blob, fname, name, canvas.toDataURL('image/png')); else { download(blob, fname); toast('图片已下载'); }
     });
   }
 
