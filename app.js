@@ -1298,7 +1298,9 @@
         <label class="field">邮箱<input type="email" id="lf-email" autocomplete="username" required></label>
         <label class="field">密码<input type="password" id="lf-pw" autocomplete="current-password" required></label>
         <button class="btn-primary" type="submit">登录</button>
-      </form></div>`;
+      </form>
+      <a href="confirm.html" class="btn" style="text-align:center;display:block;text-decoration:none">我是业务员，点这里确认单子</a>
+    </div>`;
     $('#lf').onsubmit = async (e) => { e.preventDefault(); await run(() => S.login($('#lf-email').value.trim(), $('#lf-pw').value)); start(); };
   }
 
