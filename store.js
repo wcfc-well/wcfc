@@ -48,6 +48,8 @@
       };
       save();
     }
+    // 演示数据：补上“曹会计”（自动确认，不用手机）
+    if (!db.agents.some((x) => x.name === '曹会计')) { db.agents.push({ id: ++db.seq, name: '曹会计', phone4: '', device_token: null, sort: db.agents.length, active: true, auto_confirm: true }); ls.set(KEY, JSON.stringify(db)); }
     function save() { ls.set(KEY, JSON.stringify(db)); }
     const clone = (x) => JSON.parse(JSON.stringify(x));
     const deal = (id) => db.deals.find((d) => d.id === id);
@@ -56,6 +58,9 @@
     const me = () => { const t = ls.get(TOKEN_KEY); return t && db.agents.find((x) => x.device_token === t && x.active); };
     function maybeLock(d) {
       const ps = people(d);
+      // 设成“自动确认”的人（例如不会用手机的曹会计）：单子一发出去就替 TA 确认
+      if (d.status === 'confirming') ps.filter((n) => db.agents.some((a) => a.name === n && a.auto_confirm) && !db.confirmations.some((c) => c.deal_id === d.id && c.agent_name === n))
+        .forEach((n) => db.confirmations.push({ deal_id: d.id, agent_name: n, status: 'ok', note: '自动确认', at: new Date().toISOString() }));
       if (d.status === 'confirming' && ps.length && ps.every((n) => db.confirmations.some((c) => c.deal_id === d.id && c.agent_name === n && c.status === 'ok'))) {
         d.status = 'locked'; d.locked_at = new Date().toISOString();
       }
@@ -69,7 +74,7 @@
       listAgents: () => ok(db.agents.slice().sort((a, b) => a.sort - b.sort)),
       async saveAgent(a) {
         if (db.agents.some((x) => x.name === a.name && x.id !== a.id)) return fail('名字重复了');
-        if (a.id) Object.assign(db.agents.find((x) => x.id === a.id), { name: a.name, phone4: a.phone4, active: a.active });
+        if (a.id) Object.assign(db.agents.find((x) => x.id === a.id), { name: a.name, phone4: a.phone4, active: a.active, auto_confirm: !!a.auto_confirm });
         else db.agents.push({ name: a.name, phone4: a.phone4 || '', id: ++db.seq, device_token: null, sort: db.agents.length, active: true });
         save(); return true;
       },
@@ -93,7 +98,7 @@
         if (!d || d.status !== 'locked') return fail('这一单没有锁定，直接改就行');
         if (d.settlement_id) return fail('这一单已经结算了，请先在“结算记录”里撤销这次结算');
         d.status = 'confirming'; d.locked_at = null; d.reopen_note = reason || ''; d.reopen_count = (d.reopen_count || 0) + 1;
-        db.confirmations = db.confirmations.filter((c) => c.deal_id !== id); save(); return true;
+        db.confirmations = db.confirmations.filter((c) => c.deal_id !== id); maybeLock(d); save(); return true;
       },
       async deleteDeal(id) {
         if (deal(id).status === 'locked') return fail('这一单大家已经确认锁定，不能删除');
@@ -112,7 +117,7 @@
       listConfirmations: () => ok(db.confirmations),
 
       // 业务员端
-      auntNames: () => ok(db.agents.filter((a) => a.active).map((a) => ({ name: a.name, bound: !!a.device_token }))),
+      auntNames: () => ok(db.agents.filter((a) => a.active && !a.auto_confirm).map((a) => ({ name: a.name, bound: !!a.device_token }))),
       async auntBind(name, phone4) {
         const a = db.agents.find((x) => x.name === name && x.active);
         if (!a) return fail('找不到这个名字');
@@ -160,8 +165,20 @@
       async login(email, pw) { await q(sb.auth.signInWithPassword({ email, password: pw })); return true; },
       async logout() { await sb.auth.signOut(); },
       listAgents: () => q(sb.from('agents').select('*').order('sort').order('id')),
+      // 手机下载：先传到云端 exports 文件夹，返回一个 7 天有效的下载链接（安卓自带浏览器也能下）
+      async uploadExport(blob, fname) {
+        const ext = (fname.split('.').pop() || 'bin').replace(/[^a-z0-9]/gi, '');
+        const id = window.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2);
+        const path = `${new Date().toISOString().slice(0, 10)}/${id}.${ext}`;
+        const bucket = sb.storage.from('exports');
+        const up = await bucket.upload(path, blob, { contentType: blob.type, upsert: false });
+        if (up.error) throw new Error(cnErr(up.error.message));
+        const { data, error } = await bucket.createSignedUrl(path, 7 * 24 * 3600, { download: fname });
+        if (error) throw new Error(cnErr(error.message));
+        return data.signedUrl;
+      },
       async saveAgent(a) {
-        const row = { name: a.name, phone4: a.phone4 || '', active: a.active !== false };
+        const row = { name: a.name, phone4: a.phone4 || '', active: a.active !== false, auto_confirm: !!a.auto_confirm };
         if (a.id) await q(sb.from('agents').update(row).eq('id', a.id));
         else { const list = await q(sb.from('agents').select('id')); await q(sb.from('agents').insert({ ...row, sort: list.length })); }
         return true;

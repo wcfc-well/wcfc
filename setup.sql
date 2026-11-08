@@ -11,6 +11,7 @@ create table if not exists agents (
   sort int not null default 0,
   active boolean not null default true
 );
+alter table agents add column if not exists auto_confirm boolean not null default false;  -- 自动确认（不会用手机的人）
 
 -- 一次结算（算钱）
 create table if not exists settlements (
@@ -175,7 +176,7 @@ grant execute on function reopen_deal(bigint, text) to authenticated;
 
 create or replace function aunt_names() returns table(name text, bound boolean)
 language sql security definer set search_path = public as $$
-  select a.name, a.device_token is not null from agents a where a.active order by a.sort, a.id;
+  select a.name, a.device_token is not null from agents a where a.active and not a.auto_confirm order by a.sort, a.id;  -- 自动确认的人不用登记
 $$;
 
 -- 业务员第一次打开：选名字 + 店面私下发的个人密码（存在 phone4 列）。输错 5 次锁住，要店面解锁。
@@ -237,3 +238,24 @@ end $$;
 
 revoke all on function aunt_names(), aunt_bind(text, text), aunt_statement(text), aunt_confirm(text, bigint, text, text) from public;
 grant execute on function aunt_names(), aunt_bind(text, text), aunt_statement(text), aunt_confirm(text, bigint, text, text) to anon, authenticated;
+
+-- ---------- 2026-11-08：自动确认（不会用手机的人，例如曹会计） ----------
+insert into agents (name, sort, auto_confirm) values ('曹会计', 13, true) on conflict (name) do update set auto_confirm = true;
+-- 单子发出去（待确认）时，替“自动确认”的人确认；全都确认了照常自动锁定
+create or replace function deals_auto_confirm() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.status = 'confirming' then
+    insert into confirmations (deal_id, agent_name, status, note, at)
+      select new.id, a.name, 'ok', '自动确认', now() from agents a
+       where a.auto_confirm and a.name = any(deal_people(new))
+    on conflict (deal_id, agent_name) do nothing;
+  end if;
+  return null;
+end $$;
+drop trigger if exists deals_auto_confirm on deals;
+create trigger deals_auto_confirm after insert or update on deals for each row execute function deals_auto_confirm();
+
+-- ---------- 2026-11-08：手机下载用的云端文件夹（只有店面登录后能传、能生成下载链接） ----------
+insert into storage.buckets (id, name, public) values ('exports', 'exports', false) on conflict (id) do nothing;
+drop policy if exists exports_rw on storage.objects;
+create policy exports_rw on storage.objects for all to authenticated using (bucket_id = 'exports') with check (bucket_id = 'exports');

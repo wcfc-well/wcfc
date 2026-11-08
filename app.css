@@ -116,7 +116,7 @@ td.r, th.r { text-align: right; }
 .sheet-actions { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); display: flex; gap: 10px; z-index: 21; }
 .sheet-actions .btn-primary { flex: 1; }
 
-.toast { position: fixed; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 8px; z-index: 50; font-size: 16px; max-width: 90vw; }
+.toast { position: fixed; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 8px; z-index: 200; font-size: 16px; max-width: 90vw; }
 
 /* 结算单打印 */
 .print-only { display: none; }
@@ -243,3 +243,6 @@ details.dd[open] .dd-hint::before{content:"收起 ▴"}
 .mline .mdel{min-width:0;padding:0;width:36px;color:var(--muted)}
 .madd{align-self:flex-start}
 @media (max-width:420px){.mlines{padding-left:0}.mline{grid-template-columns:6.5em minmax(0,1fr) 80px 32px;gap:6px}.mline .mdel{width:32px}}
+
+.img-box a.btn{display:flex;align-items:center;justify-content:center;text-decoration:none}
+.img-box a.btn.disabled{opacity:.6}

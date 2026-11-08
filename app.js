@@ -155,27 +155,42 @@
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = fname;
     document.body.appendChild(a); a.click(); setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 60000);
   }
-  // 手机上：先生成好，再弹一个框让人点“保存 / 发送”。
-  // 安卓要求分享和下载必须是手指刚点下去触发的，生成要几秒，所以不能生成完直接弹。
+  // 手机上：先生成好，再弹一个框让人点按钮。
+  // 很多安卓自带浏览器不认网页里生成的临时文件（blob），点了没反应。
+  // 所以线上版会先把文件传到云端，拿到一个真正的下载链接，点“保存到手机”就像下载普通文件一样。
   function offer(blob, fname, title, imgUrl) {
     const file = new File([blob], fname, { type: blob.type });
-    const canShare = !WECHAT && navigator.canShare && navigator.canShare({ files: [file] });
+    const canShare = !WECHAT && !!navigator.canShare && navigator.canShare({ files: [file] });
     const isImg = blob.type.startsWith('image/');
     const ov = document.createElement('div'); ov.className = 'img-ov';
     const tip = WECHAT ? (isImg ? '<b>长按下面的图片</b>，选“保存图片”或“发送给朋友”。' : '')
-      : isImg ? '点下面“保存 / 发送”，或者长按图片保存。' : `${esc(fname)} 已经生成好了，点下面“保存 / 发送”。`;
+      : isImg ? '点“保存到手机”，或者长按图片保存。' : `${esc(fname)} 已经生成好了，点“保存到手机”。`;
     ov.innerHTML = `<div class="img-box"><div style="font-size:17px">${tip}</div>
       ${isImg ? `<img src="${imgUrl}" alt="${esc(title)}">` : ''}
-      <div class="row" style="gap:8px">${WECHAT ? '' : '<button class="btn-primary grow" data-save>保存 / 发送</button>'}<button class="grow" data-close>关闭</button></div></div>`;
+      <div class="small muted" data-st aria-live="polite"></div>
+      ${WECHAT ? '' : `<div class="row" style="gap:8px"><a class="btn btn-primary grow" data-save href="#" role="button">保存到手机</a>${canShare ? '<button class="grow" data-share>发送给…</button>' : ''}</div>`}
+      <div class="row" style="gap:8px"><button class="grow" data-copy hidden>复制下载链接</button><button class="grow" data-close>关闭</button></div></div>`;
+    const st = (m) => { ov.querySelector('[data-st]').textContent = m; };
     ov.querySelector('[data-close]').onclick = () => ov.remove();
-    const sv = ov.querySelector('[data-save]');
-    if (sv) sv.onclick = async () => {
-      if (canShare) {
-        try { await navigator.share({ files: [file], title }); return; } catch (e) { if (e.name === 'AbortError') return; }
-      }
-      download(blob, fname); toast('已保存到手机的“下载”文件夹');
-    };
     document.body.appendChild(ov);
+    if (WECHAT) return;
+    const sv = ov.querySelector('[data-save]'), cp = ov.querySelector('[data-copy]');
+    let link = null;
+    // 线上：先传到云端（大约 1~3 秒）；演示模式没有云端，用老办法
+    if (S.uploadExport) {
+      sv.classList.add('disabled'); sv.textContent = '正在准备…';
+      S.uploadExport(blob, fname).then((url) => {
+        link = url; sv.href = url; sv.setAttribute('download', fname); sv.classList.remove('disabled'); sv.textContent = '保存到手机'; cp.hidden = false;
+      }).catch(() => { sv.classList.remove('disabled'); sv.textContent = '保存到手机'; st('网络不好，没准备好下载链接，先试试直接保存。'); });
+    }
+    sv.onclick = (e) => {
+      if (sv.classList.contains('disabled')) { e.preventDefault(); return; }
+      if (link) { st('已经开始下载，看手机顶部的下载提示，或者到“文件管理 → 下载”里找。没反应就点“复制下载链接”，粘贴到浏览器打开。'); return; } // 让浏览器按普通链接下载
+      e.preventDefault(); download(blob, fname); st('已保存到手机的“下载”文件夹。没反应的话请长按图片保存，或者换个浏览器。');
+    };
+    cp.onclick = () => link && copy(link);
+    const sh = ov.querySelector('[data-share]');
+    if (sh) sh.onclick = async () => { try { await navigator.share({ files: [file], title }); } catch (e) { if (e.name !== 'AbortError') st('这个手机不支持直接发送，请点“保存到手机”。'); } };
   }
   function busy(btn, fn) {
     return async () => { const old = btn.textContent; btn.textContent = '正在生成…'; btn.disabled = true;
@@ -725,11 +740,11 @@
     for (;;) { const c = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0'); if (!used.has(c)) return c; }
   }
   const isLocked = (a) => (a.fail_count || 0) >= 5;
-  const agentPill = (a) => !a.active ? '<span class="pill gray">已停用</span>' : isLocked(a) ? '<span class="pill seal">输错太多次，已锁</span>'
+  const agentPill = (a) => !a.active ? '<span class="pill gray">已停用</span>' : a.auto_confirm ? '<span class="pill ok">自动确认</span>' : isLocked(a) ? '<span class="pill seal">输错太多次，已锁</span>'
     : a.device_token ? '<span class="pill ok">已绑定手机</span>' : '<span class="pill gray">还没绑定手机</span>';
   const codeMsg = (a) => `${a.name}，这是你在文城房产结算确认页面的个人密码：${a.phone4}\n只需要输入一次，请不要告诉别人。确认链接：${CONFIRM_URL()}`;
   function openCodes() {
-    const list = state.agents.filter((a) => a.active);
+    const list = state.agents.filter((a) => a.active && !a.auto_confirm);
     const old = list.filter((a) => (a.phone4 || '').length < 6).length;
     const sheet = openSheet(`<div class="wrap stack">
         <h2>业务员个人密码</h2>
@@ -820,7 +835,11 @@
             }).join('');
           })()}
         </div>
-        ${a ? `<div class="card stack no-print" style="gap:10px">
+        ${a && a.auto_confirm ? `<div class="card stack no-print" style="gap:10px">
+          <div class="row between"><h3>自动确认</h3>${agentPill(a)}</div>
+          <div>${esc(a.name)} 不用手机确认：TA 参与的单子，一发出去就自动算“已确认”，钱照常算、照常结算。其他人都确认后这一单自动锁定。</div>
+          <div class="row"><button id="a-auto">改成要手机确认</button><button id="a-active">${a.active ? '停用' : '恢复'}</button></div>
+        </div>` : a ? `<div class="card stack no-print" style="gap:10px">
           <div class="row between"><h3>个人密码</h3>${agentPill(a)}</div>
           <div class="row" style="gap:10px"><b class="num grow" style="font-size:28px;letter-spacing:.2em">${esc(a.phone4 || '—')}</b><button id="code-copy">复制发给 TA</button></div>
           ${(a.phone4 || '').length < 6 ? '<div class="notice err small">这还是以前的手机后 4 位，同事可能知道，建议点“换一个新密码”。</div>' : ''}
@@ -828,8 +847,9 @@
             <button id="code-new">换一个新密码</button>
             ${isLocked(a) ? '<button id="a-reset" class="btn-primary">解锁</button>' : a.device_token ? '<button id="a-reset">退出 TA 的手机</button>' : ''}
             <button id="a-active">${a.active ? '停用' : '恢复'}</button>
+            <button id="a-auto">设成自动确认</button>
           </div>
-          <div class="small muted">密码只私聊发给本人。业务员第一次打开确认链接时输入，输对以后这里显示“已绑定手机”。输错 5 次会锁住，要点“解锁”。怀疑密码被别人知道了，就点“换一个新密码”，再私发给本人。不在店里干了可以停用，以前的单子还在。</div>
+          <div class="small muted">不会用手机的人可以点“设成自动确认”：TA 的单子会自动算已确认，不用输密码。密码只私聊发给本人。业务员第一次打开确认链接时输入，输对以后这里显示“已绑定手机”。输错 5 次会锁住，要点“解锁”。怀疑密码被别人知道了，就点“换一个新密码”，再私发给本人。不在店里干了可以停用，以前的单子还在。</div>
         </div>` : ''}
       </div>
       <div class="sheet-actions"><button id="aclose" class="btn-block">返回</button></div>`, name);
@@ -845,6 +865,7 @@
     if ($('#code-copy', sheet)) $('#code-copy', sheet).onclick = () => copy(codeMsg(a));
     if ($('#code-new', sheet)) twice($('#code-new', sheet), '确定换？再点一次', async () => { await run(() => S.setCode(a.id, newCode())); await again('已换好，记得私发新密码'); });
     if ($('#a-reset', sheet)) $('#a-reset', sheet).onclick = async () => { await run(() => S.resetBinding(a.id)); await again(isLocked(a) ? '已解锁' : '已退出，TA 要重新输密码'); };
+    if ($('#a-auto', sheet)) twice($('#a-auto', sheet), a.auto_confirm ? '确定？再点一次' : '确定自动确认？再点一次', async () => { await run(() => S.saveAgent({ ...a, auto_confirm: !a.auto_confirm })); await again(a.auto_confirm ? '已改成要手机确认' : '已设成自动确认，以后 TA 的单子自动算已确认'); });
     if ($('#a-active', sheet)) $('#a-active', sheet).onclick = async () => { await run(() => S.saveAgent({ ...a, active: !a.active })); await again(a.active ? '已停用' : '已恢复'); };
   }
 
