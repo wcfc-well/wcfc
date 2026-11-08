@@ -863,7 +863,7 @@
   const COMMUNITIES = ['东亭家园', '厦亭家园', ...zones('怡邻花园', 5), '悬珠花园', '阳澄人家', '亭南新村', ...zones('青苑新村', 6), ...zones('畅苑新村', 4), '青灯新村', '亭苑', '金陵花园', '绿地', '融锦苑', '雍合湾', '唯锦苑', '唯亭苑'];
   const layoutText = (x) => x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
   const specLine = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : '', x.decoration, x.elevator ? '有电梯' : '没电梯'].filter(Boolean).map(esc).join(' · ');
-  const LF0 = { kind: '', status: 'active', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
+  const LF0 = { kind: '', status: '', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
   const matchListing = (x, F, noStatus) => {
     const kw = (F.q || '').trim();
     if (!noStatus && F.status && x.status !== F.status) return false;

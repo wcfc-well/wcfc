@@ -265,7 +265,7 @@ begin
   select * into d from deals where id = p_deal for update;
   if not found or d.status <> 'confirming' then raise exception '这一单现在不能确认'; end if;
   if not (a.name = any(deal_people(d))) then raise exception '这一单没有您'; end if;
-  if p_status = 'ok' and a.name = any(d.client_agents) then
+  if p_status = 'ok' and a.name = any(d.client_agents) and d.parent_id is null then  -- 补记的返点不用再填客户
     cn := coalesce(nullif(trim(p_cust_name), ''), d.customer_name);
     cp := coalesce(nullif(trim(p_cust_phone), ''), d.customer_phone);
     if coalesce(cn, '') = '' then raise exception '您是客户方业务员，请先填客户名字'; end if;
@@ -454,6 +454,9 @@ end $$;
 revoke all on function aunt_set_customer(text, bigint, text, text) from public;
 grant execute on function aunt_set_customer(text, bigint, text, text) to anon, authenticated;
 
+-- ---------- 2026-11-08：补记晚到的返点（单独一笔，挂在原单下面，只让分这笔钱的业务员确认） ----------
+alter table deals add column if not exists parent_id bigint references deals(id) on delete set null;
+
 -- ---------- 2026-11-08：新加“合作”类型（和别的中介合作，总佣金对半分），记下合作的中介名字 ----------
 alter table deals drop constraint if exists deals_type_check;
 alter table deals add constraint deals_type_check check (type in ('二手买卖', '租房', '新房', '合作'));
@@ -479,3 +482,30 @@ create trigger deals_auto_confirm after insert or update on deals for each row e
 insert into storage.buckets (id, name, public) values ('exports', 'exports', false) on conflict (id) do nothing;
 drop policy if exists exports_rw on storage.objects;
 create policy exports_rw on storage.objects for all to authenticated using (bucket_id = 'exports') with check (bucket_id = 'exports');
+
+-- ---------- 2026-11-08：以前记的账补进房源（房源功能上线前记的单子没有房源，这里一次性补上，以后重复跑也不会重复建） ----------
+do $$
+declare d record; c text; u text; t text; lid bigint;
+  comms text[] := array['东亭家园','厦亭家园','怡邻花园一区','怡邻花园二区','怡邻花园三区','怡邻花园四区','怡邻花园五区','悬珠花园','阳澄人家','亭南新村',
+    '青苑新村一区','青苑新村二区','青苑新村三区','青苑新村四区','青苑新村五区','青苑新村六区','畅苑新村一区','畅苑新村二区','畅苑新村三区','畅苑新村四区',
+    '青灯新村','亭苑','金陵花园','绿地','融锦苑','雍合湾','唯锦苑','唯亭苑'];
+begin
+  for d in select * from deals where listing_id is null and parent_id is null and type <> '新房' and trim(coalesce(title, '')) <> '' order by deal_date, id loop
+    t := trim(d.title);
+    select x into c from unnest(comms) x where t like x || '%' order by length(x) desc limit 1;
+    if c is not null then u := trim(substr(t, length(c) + 1));
+    elsif position(' ' in t) > 0 then c := split_part(t, ' ', 1); u := trim(substr(t, length(c) + 2));
+    else c := ''; u := t; end if;
+    select id into lid from listings where regexp_replace(community, '\s', '', 'g') = regexp_replace(c, '\s', '', 'g')
+                                       and regexp_replace(unit, '\s', '', 'g') = regexp_replace(u, '\s', '', 'g');
+    if lid is null then
+      insert into listings (kind, community, unit, owners, agents, status, needs_info, created_at, created_by, updated_by)
+      values (case when d.type = '租房' then '出租' else '出售' end, c, u,
+        coalesce((select jsonb_agg(jsonb_build_object('name', n, 'phone', '')) from regexp_split_to_table(coalesce(d.owner_name, ''), '[、，,\s]+') n where n <> ''), '[]'),
+        case when d.type = '合作' then d.client_agents else d.listing_agents end, 'done', true, d.deal_date, '周姐', '周姐')
+      returning id into lid;
+    end if;
+    update deals set listing_id = lid where id = d.id;  -- 锁定的单子也允许改 listing_id（不影响分钱）
+    c := null; lid := null;
+  end loop;
+end $$;
