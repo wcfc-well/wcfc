@@ -173,9 +173,10 @@
         const bucket = sb.storage.from('exports');
         const up = await bucket.upload(path, blob, { contentType: blob.type, upsert: false });
         if (up.error) throw new Error(cnErr(up.error.message));
-        const { data, error } = await bucket.createSignedUrl(path, 7 * 24 * 3600, { download: fname });
-        if (error) throw new Error(cnErr(error.message));
-        return data.signedUrl;
+        const [d, v] = await Promise.all([bucket.createSignedUrl(path, 7 * 24 * 3600, { download: fname }), bucket.createSignedUrl(path, 7 * 24 * 3600)]);
+        if (d.error || v.error) throw new Error(cnErr((d.error || v.error).message));
+        // download：点了直接下载；view：在微信里点开直接看，长按图片可以保存或转发
+        return { download: d.data.signedUrl, view: v.data.signedUrl };
       },
       async saveAgent(a) {
         const row = { name: a.name, phone4: a.phone4 || '', active: a.active !== false, auto_confirm: !!a.auto_confirm };

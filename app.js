@@ -19,8 +19,13 @@
   }
   async function run(fn) { try { return await fn(); } catch (e) { toast(e.message || '出错了，请再试一次'); throw e; } }
   async function copy(text) {
-    try { await navigator.clipboard.writeText(text); toast('链接已复制，可以发到群里'); }
-    catch (e) { const i = $('#copy-src'); if (i) { i.focus(); i.select(); } toast('请长按链接手动复制'); }
+    try { await navigator.clipboard.writeText(text); toast('已复制，可以粘贴发出去'); return; } catch (e) { /* 有些安卓浏览器没有这个功能，换老办法 */ }
+    const t = document.createElement('textarea'); t.value = text; t.setAttribute('readonly', ''); t.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(t); t.select(); t.setSelectionRange(0, text.length);
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    t.remove();
+    if (ok) toast('已复制，可以粘贴发出去');
+    else { const i = $('#copy-src'); if (i) { i.focus(); i.select(); } toast('这个浏览器不让自动复制，请长按手动复制'); }
   }
   // 需要点两次的按钮（代替弹窗确认）
   function twice(btn, warnText, fn) {
@@ -169,18 +174,19 @@
       ${isImg ? `<img src="${imgUrl}" alt="${esc(title)}">` : ''}
       <div class="small muted" data-st aria-live="polite"></div>
       ${WECHAT ? '' : `<div class="row" style="gap:8px"><a class="btn btn-primary grow" data-save href="#" role="button">保存到手机</a>${canShare ? '<button class="grow" data-share>发送给…</button>' : ''}</div>`}
+      <button class="btn-block" data-wx hidden>复制链接，发到微信</button>
       <div class="row" style="gap:8px"><button class="grow" data-copy hidden>复制下载链接</button><button class="grow" data-close>关闭</button></div></div>`;
     const st = (m) => { ov.querySelector('[data-st]').textContent = m; };
     ov.querySelector('[data-close]').onclick = () => ov.remove();
     document.body.appendChild(ov);
     if (WECHAT) return;
-    const sv = ov.querySelector('[data-save]'), cp = ov.querySelector('[data-copy]');
-    let link = null;
+    const sv = ov.querySelector('[data-save]'), cp = ov.querySelector('[data-copy]'), wx = ov.querySelector('[data-wx]');
+    let link = null, view = null;
     // 线上：先传到云端（大约 1~3 秒）；演示模式没有云端，用老办法
     if (S.uploadExport) {
       sv.classList.add('disabled'); sv.textContent = '正在准备…';
-      S.uploadExport(blob, fname).then((url) => {
-        link = url; sv.href = url; sv.setAttribute('download', fname); sv.classList.remove('disabled'); sv.textContent = '保存到手机'; cp.hidden = false;
+      S.uploadExport(blob, fname).then((u) => {
+        link = u.download; view = u.view; wx.hidden = false; sv.href = link; sv.setAttribute('download', fname); sv.classList.remove('disabled'); sv.textContent = '保存到手机'; cp.hidden = false;
       }).catch(() => { sv.classList.remove('disabled'); sv.textContent = '保存到手机'; st('网络不好，没准备好下载链接，先试试直接保存。'); });
     }
     sv.onclick = (e) => {
@@ -189,6 +195,8 @@
       e.preventDefault(); download(blob, fname); st('已保存到手机的“下载”文件夹。没反应的话请长按图片保存，或者换个浏览器。');
     };
     cp.onclick = () => link && copy(link);
+    // 发微信：复制一段话 + 链接，粘贴到微信聊天里。对方点开就能看（图片可以长按保存、转发），7 天内有效
+    wx.onclick = () => { if (!view) return; copy(`【文城房产】${title}（7 天内有效，点开查看）：${view}`); st('已复制。打开微信，在聊天框里长按“粘贴”发出去就行。'); };
     const sh = ov.querySelector('[data-share]');
     if (sh) sh.onclick = async () => { try { await navigator.share({ files: [file], title }); } catch (e) { if (e.name !== 'AbortError') st('这个手机不支持直接发送，请点“保存到手机”。'); } };
   }
