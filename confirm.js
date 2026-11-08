@@ -18,7 +18,8 @@
 
   let view = 'todo', todoN = 0, nudgeShown = false;
   const LST = { active: (k) => k === '出租' ? '在租' : '在售', done: (k) => k === '出租' ? '已租' : '已售' };
-  const tabs = () => `<div class="ctabs"><button data-view="todo" aria-pressed="${view === 'todo'}">待办${todoN ? ` <span class="todo-n">${todoN}</span>` : ''}</button><button data-view="listings" aria-pressed="${view === 'listings'}">房源</button><button data-view="stmt" aria-pressed="${view === 'stmt'}">我的结算</button></div>`;
+  // 底部标签，和店面那边一样放在最下面
+  const tabs = () => `<nav class="tabbar tabbar3" aria-label="主菜单"><button data-view="todo" aria-current="${view === 'todo'}">待办${todoN ? ` <span class="todo-n">${todoN}</span>` : ''}</button><button data-view="listings" aria-current="${view === 'listings'}">房源</button><button data-view="stmt" aria-current="${view === 'stmt'}">我的结算</button></nav>`;
   // 店面催办：打开页面时弹一个框，写着还有哪些事没做
   function showNudge(n, items) {
     const left = items.filter(([k]) => k > 0);
@@ -98,7 +99,7 @@
     const shown = list.filter((x) => matchListing(x, LF));
     const toFill = list.filter((x) => x.needs_info && x.mine);
     app.innerHTML = `<div class="wrap stack" style="max-width:560px">
-      ${demoBar()}${tabs()}
+      ${demoBar()}
       <button class="add-listing" id="l-add"><span class="plus">＋</span><span><b>录入新房源</b><span class="small">新拿到的房子在这里录，您就是维护人</span></span></button>
       ${toFill.length ? `<div class="todo-card stack" style="gap:8px"><div class="todo-head"><span class="todo-num">${toFill.length}</span><b>套房子的资料要您补一下</b></div>
         <div class="small">店里记账时自动建的，只有小区和坐落。您是房源维护人，请补上户型、面积这些。</div>
@@ -114,7 +115,7 @@
             <div>${x.deal_price != null ? `<b class="num" style="font-size:18px;color:#c0392b">成交 ${Number(x.deal_price).toLocaleString()} ${x.kind === '出租' ? '元/月' : '万'}</b> <span class="small muted">挂牌 ${priceText(x)}</span>` : `<b class="num" style="font-size:18px;color:var(--accent)">${priceText(x)}</b>`}</div></div>
           ${x.photo_thumb ? `<img class="lphoto" data-lphoto="${x.id}" src="${x.photo_thumb}" alt="房子照片，点开看大图">` : ''}</div>
         </button>`).join('') || '<div class="card muted">没有符合条件的房源</div>'}
-    </div>`;
+    </div>${tabs()}`;
     bindDemo(); bindTabs();
     bindFilter(app, LF, listings);
     app.querySelectorAll('[data-l]').forEach((b) => b.onclick = (e) => e.target.closest('[data-lphoto]') ? Photo.show(S.auntListingPhoto(Number(b.dataset.l))) : listingDetail(list.find((x) => String(x.id) === b.dataset.l), list));
@@ -374,9 +375,9 @@
       ${stlHTML || '<div class="card muted">还没有结算过。</div>'}
       <div class="small muted">规则：每单收入减支出是总账，再扣店面维护是纯利润（只扣佣金部分的 10%，返点不扣；新房不扣）；佣金部分的纯利润房源方 20%、客户方 80%（新房全算客户方）；返点直接归一方：银行、装修返点归客户方，垫资返点归房源方，其他收入看店里选的哪一方；合作单总佣金一半给合作中介，我们这一半店面和业务员各一半；每一块业务员拿一半，由这一单的业务员平分。</div>`;
     app.innerHTML = `<div class="wrap stack" style="max-width:560px">
-      ${demoBar()}${tabs()}
+      ${demoBar()}
       ${view === 'todo' ? todoHTML : stmtHTML}
-    </div>`;
+    </div>${tabs()}`;
     bindDemo(); bindTabs();
     if ($('#go-todo')) $('#go-todo').onclick = () => { view = 'todo'; start(); };
     app.querySelectorAll('[data-fill]').forEach((b) => b.onclick = () => editListing(allL.find((x) => String(x.id) === b.dataset.fill), allL));

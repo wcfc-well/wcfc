@@ -340,10 +340,11 @@
       return `<span class="small muted">${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())} 催过，${x.seen_at ? '她已经看到了' : '她还没打开看'}</span>`; };
     const nudgeRows = perNames.map((n) => `<div class="nudge-row"><div class="grow"><button class="linkish" data-a="${esc(n)}"><b>${esc(n)}</b></button>
         <div class="small">${Object.entries(t.per[n]).filter(([, v]) => v).map(([k, v]) => `<b class="num">${v}</b> ${LBL[k]}`).join('，')}</div>${nudgeTxt(n)}</div>
-        <button data-nudge="${esc(n)}">催一下</button></div>`).join('');
+        </div>`).join('');
     shell(`
       <div class="card stack" style="gap:6px"><h2 style="margin:0">待办</h2><div class="small muted">哪些事还没做完、卡在谁那里，一页看清。点名字或单子直接打开。</div></div>
-      ${sec('按人看 · 催办', perNames.length, '每个人还有几件事没做。点“催一下”，她下次打开业务员页会弹出提醒，写着她还有哪些没做。急的话再在群里说一声。', nudgeRows + (perNames.length > 1 ? '<button class="btn-block" id="nudge-all" style="margin-top:8px">全部催一下</button>' : ''), '大家手上都没有没做完的事。')}
+      ${perNames.length ? `<button class="btn-primary btn-block" id="nudge-all" style="font-size:19px;min-height:54px">🔔 一起催办（${perNames.length} 人）</button>` : ''}
+      ${sec('按人看', perNames.length, '每个人还有几件事没做。点上面“一起催办”，这些人下次打开业务员页都会弹出提醒，写着她自己还有哪些没做。', nudgeRows, '大家手上都没有没做完的事。')}
       ${sec('等业务员确认', t.confirming.length, `${t.confirming.length} 单还在等确认。下面是每个人还有几单没点确认，可以在群里提醒一下。`, unconfRows, '所有发出去的单子都确认完了。')}
       ${sec('客户信息没填', t.noCust.length, '客户方业务员确认时会填。下面按客户方业务员列出来，同一单有几个人的话谁填都行。', custRows, '每一单的客户名字、电话都有了。')}
       ${sec('房源待补全', t.needInfo.length, '记账时自动建的房源，只有小区和坐落，等房源维护人补户型、面积。', needRows, '没有要补全的房源。')}
@@ -357,8 +358,7 @@
     app.querySelectorAll('[data-l]').forEach((b) => b.onclick = () => openListing(state.listings.find((l) => String(l.id) === b.dataset.l)));
     app.querySelectorAll('[data-a]').forEach((b) => b.onclick = () => openAgent(b.dataset.a));
     if ($('#go-settle')) $('#go-settle').onclick = () => { state.tab = 'settle'; render(); };
-    const doNudge = async (names, btn) => { btn.disabled = true; btn.textContent = '正在发…'; await run(() => S.nudge(names)); await loadAll(); renderTodo(); toast(names.length > 1 ? `已经催了 ${names.length} 个人` : `已经催了 ${names[0]}`); };
-    app.querySelectorAll('[data-nudge]').forEach((b) => b.onclick = () => doNudge([b.dataset.nudge], b));
+    const doNudge = async (names, btn) => { btn.disabled = true; btn.textContent = '正在发…'; await run(() => S.nudge(names)); await loadAll(); renderTodo(); toast(`已经催了 ${names.length} 个人`); };
     if ($('#nudge-all')) $('#nudge-all').onclick = (e) => doNudge(perNames, e.currentTarget);
   }
 
