@@ -1,6 +1,6 @@
 // 业务员确认页：一个链接，第一次选名字 + 店面私下发的个人密码，以后自动认出是谁
 (function () {
-  const S = window.Store, C = window.Calc;
+  const S = window.Store, C = window.Calc, Photo = window.Photo;
   const $ = (sel, el = document) => el.querySelector(sel);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   // 每个电话旁边的 📞：点了直接拨打（号码取旁边输入框里的，或按钮自带的）
@@ -91,17 +91,18 @@
         ${toFill.map((x) => `<button class="todo-btn" data-fill="${x.id}"><span>📝 ${esc(x.community)} ${esc(x.unit)}</span><span>去补资料 ›</span></button>`).join('')}</div>` : ''}
       ${filterCard(LF, list, ['active', 'done'])}
       <div class="lf-count">找到 <b>${shown.length}</b> 套房源</div>
-      ${shown.map((x) => `<button class="card listing" data-l="${x.id}">
-        <div class="row" style="gap:10px;flex-wrap:nowrap"><span class="tc ${x.kind === '出租' ? 'tt-b' : 'tt-a'}">${x.kind}</span>
+      ${shown.map((x) => `<button class="card listing${x.status === 'done' ? ' done' : ''}" data-l="${x.id}">
+        ${x.status === 'done' ? `<span class="seal" aria-label="已成交">${x.kind === '出租' ? '已租' : '已售'}</span>` : ''}
+        <div class="row" style="gap:10px;flex-wrap:nowrap"><span class="tc ${x.kind === '出租' ? 'tt-b' : 'tt-a'}">${x.kind}</span>${x.photo_thumb ? `<img class="lthumb" data-lphoto="${x.id}" src="${x.photo_thumb}" alt="房子照片">` : ''}
           <div class="grow" style="min-width:0;text-align:left"><b style="font-size:18px">${esc(x.community)} ${esc(x.unit)}</b>
             <div class="small muted">${specLine(x)}</div></div>
-          <div style="text-align:right;flex:none"><b class="num" style="font-size:18px;color:var(--accent)">${priceText(x)}</b><div class="small muted">${(LST[x.status] || LST.active)(x.kind)}</div></div></div>
+          <div style="text-align:right;flex:none">${x.deal_price != null ? `<b class="num" style="font-size:18px;color:#c0392b">成交 ${Number(x.deal_price).toLocaleString()} ${x.kind === '出租' ? '元/月' : '万'}</b><div class="small muted">挂牌 ${priceText(x)}</div>` : `<b class="num" style="font-size:18px;color:var(--accent)">${priceText(x)}</b><div class="small muted">${(LST[x.status] || LST.active)(x.kind)}</div>`}</div></div>
         <div class="small muted" style="text-align:left">房源维护人 ${esc((x.agents || []).join('、') || '—')} · 房东 ${esc(owners(x))}</div>
         ${x.feedback.length ? `<div class="small muted" style="text-align:left">反馈 ${x.feedback.length} 条，最新：${esc(x.feedback[x.feedback.length - 1].author)}：${esc(x.feedback[x.feedback.length - 1].content)}</div>` : ''}</button>`).join('') || '<div class="card muted">没有符合条件的房源</div>'}
     </div>`;
     bindDemo(); bindTabs();
     bindFilter(app, LF, listings);
-    app.querySelectorAll('[data-l]').forEach((b) => b.onclick = () => listingDetail(list.find((x) => String(x.id) === b.dataset.l), list));
+    app.querySelectorAll('[data-l]').forEach((b) => b.onclick = (e) => e.target.closest('[data-lphoto]') ? Photo.show(S.auntListingPhoto(Number(b.dataset.l))) : listingDetail(list.find((x) => String(x.id) === b.dataset.l), list));
     app.querySelectorAll('[data-fill]').forEach((b) => b.onclick = () => editListing(list.find((x) => String(x.id) === b.dataset.fill), list));
     $('#l-add').onclick = () => editListing(null, list);
   }
@@ -123,6 +124,7 @@
       <button id="back" style="align-self:flex-start">‹ ${isNew ? '回到房源列表' : '不改了，返回'}</button>
       <h2 style="margin:0">${isNew ? '录入新房源' : `修改房子信息：${esc(x.community)} ${esc(x.unit)}`}</h2>
       ${x.needs_info ? '<div class="notice">这套是店里记账时自动建的，请把户型、面积这些补上。</div>' : ''}
+      <div class="card stack" id="ph-box" style="gap:8px"></div>
       <div class="card stack">
         <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
         <label class="field">小区<select id="e-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
@@ -152,6 +154,7 @@
       <button class="btn-primary btn-block" id="e-save" style="min-height:56px">${isNew ? '保存这套房源' : '保存修改'}</button>
     </div>`;
     window.scrollTo(0, 0);
+    const phField = Photo.field($('#ph-box'), x.photo_thumb, () => S.auntListingPhoto(x.id));
     $('#back').onclick = () => isNew ? listings() : listingDetail(all.find((y) => y.id === x.id), all);
     const commVal = () => { const v = $('#e-comm-sel').value; return (v === '__other' ? $('#e-comm').value : v).trim(); };
     const key = (c, u) => (c + '|' + u).replace(/\s/g, '');
@@ -176,6 +179,7 @@
         area: num($('#e-area').value), decoration: $('#e-deco').value, elevator: !!x.elevator, price: num($('#e-price').value),
         owners: canOwner ? [...app.querySelectorAll('#olines .oline')].map((o) => ({ name: o.querySelector('[data-on]').value.trim(), phone: o.querySelector('[data-op]').value.trim() })).filter((o) => o.name || o.phone) : x.owners || [] };
       if (isNew) { p.agents = x.agents; p.note = $('#e-note').value.trim(); }
+      const pc = phField.changed(); if (pc !== undefined) { p.photo = pc ? pc.photo : ''; p.photo_thumb = pc ? pc.photo_thumb : ''; }
       $('#e-save').disabled = true;
       try { const id = await S.auntListingSave(isNew ? null : x.id, p); const list = await S.auntListings(); const y = list.find((z) => z.id === id); if (y) listingDetail(y, list); else listings(); }
       catch (e) { $('#e-save').disabled = false; err(e.message); }
@@ -187,6 +191,8 @@
       <button id="back" style="align-self:flex-start">‹ 回到房源列表</button>
       <div class="card stack" style="gap:6px">
         <div class="row" style="gap:10px;flex-wrap:nowrap"><span class="tc ${x.kind === '出租' ? 'tt-b' : 'tt-a'}">${x.kind}</span><h2 class="grow" style="margin:0">${esc(x.community)} ${esc(x.unit)}</h2></div>
+        ${x.photo_thumb ? `<img class="ph-prev" id="l-photo" src="${x.photo_thumb}" alt="房子照片，点开放大">` : ''}
+        ${x.deal_price != null ? `<div class="sold-line">${x.kind === '出租' ? '已租' : '已售'}，成交价 <b class="num">${Number(x.deal_price).toLocaleString()} ${x.kind === '出租' ? '元/月' : '万'}</b></div>` : ''}
         <div class="kv"><span>房源维护人</span><span>${esc((x.agents || []).join('、') || '—')}</span><span>户型分类</span><span>${esc(x.category || '—')}</span><span>几室几厅</span><span>${esc(layoutText(x) || '—')}</span><span>电梯</span><span>${x.elevator ? '有电梯' : '没电梯'}</span><span>面积</span><span>${x.area ? esc(x.area) + '㎡' : '—'}</span><span>装修</span><span>${esc(x.decoration || '—')}</span>
           <span>${x.kind === '出租' ? '月租' : '总价'}</span><span class="num"><b>${priceText(x)}</b></span><span>房东</span><span>${(x.owners || []).length ? x.owners.map(telLink).join('<br>') : '—'}</span></div>
         <button id="l-edit">修改房子信息</button>
@@ -205,6 +211,7 @@
     window.scrollTo(0, 0);
     const reopen = async () => { const list = await S.auntListings(); const y = list && list.find((z) => z.id === x.id); if (y) listingDetail(y, list); else listings(); };
     $('#back').onclick = () => listings();
+    if ($('#l-photo')) $('#l-photo').onclick = () => Photo.show(S.auntListingPhoto(x.id));
     $('#l-edit').onclick = async () => editListing(x, all || await S.auntListings());
     $('#note-save').onclick = async () => { try { await S.auntListingNote(x.id, $('#note').value.trim()); await reopen(); } catch (e) { err(e.message); } };
     $('#fb-add').onclick = async () => { const t = $('#fb').value.trim(); if (!t) return err('请先写反馈内容'); try { await S.auntListingFeedback(x.id, t); await reopen(); } catch (e) { err(e.message); } };

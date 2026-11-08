@@ -72,6 +72,9 @@
     }
     const clone = (x) => JSON.parse(JSON.stringify(x));
     const deal = (id) => db.deals.find((d) => d.id === id);
+    // 房源照片：一套房一张。大图单独存，列表里只带小图
+    const setPhoto = (id, photo, thumb) => { db.photos = db.photos || {}; const l = db.listings.find((y) => y.id === id);
+      if (photo) { db.photos[id] = photo; if (l) l.photo_thumb = thumb || ''; } else { delete db.photos[id]; if (l) l.photo_thumb = ''; } };
     const ok = (v) => Promise.resolve(clone(v));
     const fail = (m) => Promise.reject(new Error(m));
     const me = () => { const t = ls.get(TOKEN_KEY); return t && db.agents.find((x) => x.device_token === t && x.active); };
@@ -106,7 +109,7 @@
         if (old && old.status === 'locked') return fail('这一单大家已经确认锁定，不能再改');
         const status = send ? 'confirming' : 'draft';
         if (old && (!sameContent(old, d) || status === 'draft')) db.confirmations = db.confirmations.filter((c) => c.deal_id !== old.id);
-        const row = { deal_date: d.deal_date, type: d.type, title: d.title, owner_name: d.owner_name || '', partner: d.partner || '', customer_phone: d.customer_phone || '', customer_name: d.customer_name || '', incomes: clone(d.incomes), expenses: clone(d.expenses), listing_agents: d.listing_agents.slice(), client_agents: d.client_agents.slice(), note: d.note, status, listing_id: d.listing_id || null, parent_id: d.parent_id || null };
+        const row = { deal_date: d.deal_date, type: d.type, title: d.title, owner_name: d.owner_name || '', partner: d.partner || '', customer_phone: d.customer_phone || '', customer_name: d.customer_name || '', incomes: clone(d.incomes), expenses: clone(d.expenses), listing_agents: d.listing_agents.slice(), client_agents: d.client_agents.slice(), note: d.note, status, listing_id: d.listing_id || null, parent_id: d.parent_id || null, deal_price: d.deal_price == null || d.deal_price === '' ? null : Number(d.deal_price) };
         const oldL = old ? old.listing_id : null;
         let target;
         if (old) target = Object.assign(old, row); else { target = { ...row, id: ++db.seq, locked_at: null, settlement_id: null }; db.deals.push(target); }
@@ -173,18 +176,23 @@
         maybeLock(d); save();
       },
       demoForget() { const a = me(); if (a) { a.device_token = null; save(); } ls.del(TOKEN_KEY); },
+      listingPhoto: async (id) => (db.photos || {})[id] || '',
+      auntListingPhoto: async (id) => (me() ? (db.photos || {})[id] || '' : fail('请重新登记')),
       listListings: () => ok(db.listings.slice().sort((a, b) => (b.created_at + String(b.id).padStart(8, '0')).localeCompare(a.created_at + String(a.id).padStart(8, '0')))),
       async saveListing(x) {
+        x = { ...x }; const ph = 'photo' in x ? x.photo : undefined; delete x.photo;
         const dup = db.listings.find((y) => y.id !== x.id && houseKey(y) === houseKey(x));
         if (dup) return fail(`系统里已经有这套房子了（${dup.community} ${dup.unit}，维护人 ${(dup.agents || []).join('、') || '—'}），不能重复录入`);
         const old = x.id && db.listings.find((y) => y.id === x.id);
-        if (x.id) { Object.assign(old, x); save(); return x.id; }
-        const id = ++db.seq; db.listings.push({ ...x, id, created_at: x.created_at || new Date().toISOString().slice(0, 10) });
+        let id = x.id;
+        if (id) Object.assign(old, x);
+        else { id = ++db.seq; db.listings.push({ ...x, id, created_at: x.created_at || new Date().toISOString().slice(0, 10) }); }
+        if (ph !== undefined) setPhoto(id, ph, x.photo_thumb);
         save(); return id;
       },
       async deleteListing(id) { db.listings = db.listings.filter((y) => y.id !== id); save(); },
       async addFeedback(id, author, content) { const l = db.listings.find((y) => y.id === id); (l.feedback = l.feedback || []).push({ id: ++db.seq, author, content, created_at: new Date().toISOString() }); save(); },
-      async auntListings() { const a = me(); if (!a) return null; return clone(db.listings.filter((l) => l.status !== 'off').map((l) => ({ ...l, mine: (l.agents || []).includes(a.name), feedback: l.feedback || [] }))); },
+      async auntListings() { const a = me(); if (!a) return null; return clone(db.listings.filter((l) => l.status !== 'off').map((l) => ({ ...l, mine: (l.agents || []).includes(a.name), feedback: l.feedback || [], deal_price: (db.deals.filter((d) => d.listing_id === l.id && !d.parent_id && d.deal_price != null).sort((x, y) => y.deal_date.localeCompare(x.deal_date))[0] || {}).deal_price ?? null }))); },
       async auntListingNote(id, note) { const a = me(); if (!a) return fail('请重新登记'); const l = db.listings.find((y) => y.id === id); if ((l.note || '') === note) return; const at = new Date().toISOString(); Object.assign(l, { note, note_by: a.name, note_at: at, note_log: [...(l.note_log || []), { by: a.name, at, note }] }); save(); },
       async auntListingFeedback(id, content) { const a = me(); if (!a) return fail('请重新登记'); if (!content.trim()) return fail('反馈内容不能是空的'); const l = db.listings.find((y) => y.id === id); (l.feedback = l.feedback || []).push({ id: ++db.seq, author: a.name, content: content.trim(), created_at: new Date().toISOString() }); save(); },
       async auntListingSave(id, x) {
@@ -199,13 +207,14 @@
           const ags = (x.agents || []).filter((n) => names.includes(n));
           const nid = ++db.seq, at = new Date().toISOString();
           db.listings.push({ ...d, id: nid, agents: ags.length ? ags : [a.name], status: 'active', note: x.note || '', note_log: x.note ? [{ by: a.name, at, note: x.note }] : [], created_by: a.name, created_at: at.slice(0, 10), feedback: [] });
+          if ('photo' in x) setPhoto(nid, x.photo, x.photo_thumb);
           save(); return nid;
         }
         const l = db.listings.find((y) => y.id === id); if (!l) return fail('找不到这套房源');
         const filled = !!(d.category || d.area);
         if (l.needs_info && filled) Object.assign(d, { needs_info: false, filled_by: a.name, filled_at: new Date().toISOString() });
         if (!(l.agents || []).includes(a.name)) d.owners = l.owners || [];  // 房东信息只有房源维护人和店面能改
-        Object.assign(l, d); save(); return id;
+        Object.assign(l, d); if ('photo' in x) setPhoto(id, x.photo, x.photo_thumb); save(); return id;
       },
       // 客户名字、电话：只有店面和这一单的客户方业务员能改，不影响分钱，不作废确认
       async setCustomer(id, name, phone) { const d = deal(id); if (!d) return fail('找不到这一单'); d.customer_name = (name || '').trim(); d.customer_phone = (phone || '').trim(); save(); },
@@ -259,7 +268,7 @@
       setCode: (id, code) => q(sb.from('agents').update({ phone4: code, device_token: null, fail_count: 0 }).eq('id', id)),
       listDeals: () => q(sb.from('deals').select('*').order('deal_date', { ascending: false }).order('id', { ascending: false })),
       async saveDeal(d, send) {
-        const row = { deal_date: d.deal_date, type: d.type, title: d.title || '', owner_name: d.owner_name || '', partner: d.partner || '', customer_phone: d.customer_phone || '', customer_name: d.customer_name || '', incomes: d.incomes, expenses: d.expenses, listing_agents: d.listing_agents, client_agents: d.client_agents, note: d.note || '', status: send ? 'confirming' : 'draft', listing_id: d.listing_id || null, parent_id: d.parent_id || null };
+        const row = { deal_date: d.deal_date, type: d.type, title: d.title || '', owner_name: d.owner_name || '', partner: d.partner || '', customer_phone: d.customer_phone || '', customer_name: d.customer_name || '', incomes: d.incomes, expenses: d.expenses, listing_agents: d.listing_agents, client_agents: d.client_agents, note: d.note || '', status: send ? 'confirming' : 'draft', listing_id: d.listing_id || null, parent_id: d.parent_id || null, deal_price: d.deal_price == null || d.deal_price === '' ? null : Number(d.deal_price) };
         if (d.id) await q(sb.from('deals').update(row).eq('id', d.id)); else await q(sb.from('deals').insert(row));
         return true;
       },
@@ -276,10 +285,15 @@
       auntListingSave: (id, x) => q(sb.rpc('aunt_listing_save', { p_token: token(), p_id: id || null, p: x })),
       auntListingFeedback: (id, content) => q(sb.rpc('aunt_listing_feedback', { p_token: token(), p_id: id, p_content: content })),
       async saveListing(x) {
-        const row = { ...x }; delete row.id; delete row.feedback;
-        if (x.id) { await q(sb.from('listings').update({ ...row, updated_at: new Date().toISOString() }).eq('id', x.id)); return x.id; }
-        const r = await q(sb.from('listings').insert(row).select('id').single()); return r.id;  // 返回新房源的编号，记账自动建房源时要用
+        const row = { ...x }; delete row.id; delete row.feedback; delete row.photo; delete row.photo_thumb;
+        let id = x.id;
+        if (id) await q(sb.from('listings').update({ ...row, updated_at: new Date().toISOString() }).eq('id', id));
+        else id = (await q(sb.from('listings').insert(row).select('id').single())).id;  // 返回新房源的编号，记账自动建房源时要用
+        if ('photo' in x) await q(sb.rpc('listing_set_photo', { p_id: id, p: { photo: x.photo || '', photo_thumb: x.photo_thumb || '' } }));
+        return id;
       },
+      listingPhoto: async (id) => { const r = await q(sb.from('listing_photos').select('data').eq('listing_id', id).maybeSingle()); return r ? r.data : ''; },
+      auntListingPhoto: (id) => q(sb.rpc('aunt_listing_photo', { p_token: token(), p_id: id })),
       deleteListing: (id) => q(sb.from('listings').delete().eq('id', id)),
       createSettlement: (name, ids) => q(sb.rpc('create_settlement', { p_name: name, p_deal_ids: ids })),
       cancelSettlement: (id) => q(sb.from('settlements').delete().eq('id', id)),
@@ -310,4 +324,51 @@
   }
   window.Store = CLOUD ? cloudStore() : demoStore();
   window.StoreUtil = { involves, participants, people, STAFF };
+
+  // 房源照片：手机选一张，压缩成大图（最长 1280）和小图（最长 320），都是 jpg
+  function resizeTo(img, max, q) {
+    const k = Math.min(1, max / Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', q);
+  }
+  function loadImage(file) {
+    return new Promise((res, rej) => { const u = URL.createObjectURL(file); const i = new Image();
+      i.onload = () => { URL.revokeObjectURL(u); res(i); }; i.onerror = () => { URL.revokeObjectURL(u); rej(new Error('这张照片打不开，请换一张')); }; i.src = u; });
+  }
+  const Photo = window.Photo = {
+    async fromFile(file) {
+      if (!file) return null;
+      const img = await loadImage(file);
+      let photo = resizeTo(img, 1280, 0.78); if (photo.length > 1500000) photo = resizeTo(img, 1000, 0.65);
+      return { photo, photo_thumb: resizeTo(img, 320, 0.7) };
+    },
+    // 录入 / 修改房源时的照片框。返回 changed()：undefined = 没动；null = 删掉了；{photo, photo_thumb} = 新照片
+    field(box, thumb, getFull) {
+      let cur = thumb || '', change;
+      const draw = () => {
+        box.innerHTML = `<span class="small muted">房子照片（1 张，点照片可以放大）</span>
+          ${cur ? `<img class="ph-prev" src="${cur}" alt="房子照片">` : ''}
+          <div class="row" style="gap:8px"><label class="ph-pick"><input type="file" accept="image/*" hidden>${cur ? '换一张' : '📷 加一张照片'}</label>${cur ? '<button type="button" class="ph-del">删掉照片</button>' : ''}</div>
+          <div class="small muted ph-msg"></div>`;
+        const img = box.querySelector('.ph-prev'); if (img) img.onclick = () => Photo.show(change ? change.photo : getFull());
+        box.querySelector('input[type=file]').onchange = async (e) => {
+          const msg = box.querySelector('.ph-msg'); msg.textContent = '正在处理照片…';
+          try { const r = await Photo.fromFile(e.target.files[0]); if (!r) { msg.textContent = ''; return; } change = r; cur = r.photo_thumb; draw(); box.querySelector('.ph-msg').textContent = '保存后生效'; }
+          catch (x) { msg.textContent = x.message; }
+        };
+        const del = box.querySelector('.ph-del'); if (del) del.onclick = () => { change = null; cur = ''; draw(); box.querySelector('.ph-msg').textContent = '保存后照片就删掉了'; };
+      };
+      draw();
+      return { changed: () => change };
+    },
+    // 点了放大：黑底全屏，点哪里都关
+    show(src) {
+      const ov = document.createElement('div'); ov.className = 'lightbox'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', '房子照片');
+      ov.innerHTML = '<div class="lb-tip">加载中…</div><button type="button" class="lb-x" aria-label="关闭">×</button>';
+      document.body.appendChild(ov); ov.onclick = () => ov.remove();
+      Promise.resolve(src).then((u) => { if (!u) { ov.querySelector('.lb-tip').textContent = '没有照片'; return; } const i = new Image(); i.alt = '房子照片'; i.src = u; ov.querySelector('.lb-tip').replaceWith(i); })
+        .catch(() => { ov.querySelector('.lb-tip').textContent = '照片打不开，请检查网络'; });
+    },
+  };
 })();

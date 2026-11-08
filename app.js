@@ -1,6 +1,6 @@
 // 店面用的主界面：记账、结算（按月份勾选单子结算）、业务员名单
 (function () {
-  const S = window.Store, C = window.Calc, U = window.StoreUtil;
+  const S = window.Store, C = window.Calc, U = window.StoreUtil, Photo = window.Photo;
   const $ = (sel, el = document) => el.querySelector(sel);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   // 每个电话旁边的 📞：点了直接拨打（号码取旁边输入框里的，或按钮自带的）
@@ -309,7 +309,7 @@
       const warn = r.warnings.length ? '<span class="pill warn">要检查</span>' : '';
       return `<button class="card with-badge" data-id="${d.id}">${typeTag(d.type, true)}<div class="stack grow" style="gap:4px">
         <div class="row" style="gap:10px"><b class="grow" style="font-size:18px">${esc(d.title || '（没写房子）')}</b>${warn}</div>
-        <div class="muted small num">${d.deal_date}</div>
+        <div class="muted small num">${d.deal_date}${d.deal_price != null ? `　成交价 ${d.type === '租房' ? Number(d.deal_price).toLocaleString() + ' 元/月' : Number(d.deal_price).toLocaleString() + ' 万'}` : ''}</div>
         <div class="row between small"><span class="muted">收入 <span class="num">${f(r.income)}</span>　支出 <span class="num">${f(r.expense)}</span></span><span>总账 <b class="num">${f(r.net)}</b></span></div>
         ${partyText(d) ? `<div class="small muted">${esc(partyText(d))}</div>` : ''}
         <div class="small muted">业务员　${esc(whoText(d))}</div>
@@ -472,6 +472,7 @@
             <label class="field grow" id="owner-box" style="min-width:0">房东名字<input id="f-owner" value="${esc(d.owner_name || '')}" placeholder="例如：刘先生" ${dis}></label>
             <label class="field grow" style="min-width:0">客户名字<input id="f-cust" value="${esc(d.customer_name || '')}" placeholder="例如：陈女士" ${dis}></label>
           </div>
+          <label class="field"><span id="price-l">成交价（万元）</span><input id="f-price" inputmode="decimal" autocomplete="off" value="${d.deal_price == null ? '' : esc(d.deal_price)}" placeholder="例如：168" ${dis}></label>
           <div class="phones small" id="f-owner-phones"></div>
           <div class="phones small">${d.customer_phone ? `客户电话（业务员填的）：<a class="tel" href="tel:${esc(d.customer_phone.replace(/[^\d+]/g, ''))}">${esc(d.customer_name || '客户')} ${esc(d.customer_phone)} 📞</a>`
             : '<span class="muted">客户电话：不用你填，客户方业务员确认时会补上，补好了会自动显示在这里</span>'}</div>
@@ -499,6 +500,7 @@
       d.listing_id = d.type !== '新房' && h.listing ? h.listing.id : null;
       d.deal_date = $('#f-date', sheet).value; d.note = $('#f-note', sheet).value.trim();
       d.title = d.type === '新房' ? $('#f-title', sheet).value.trim() : h.comm || h.unit ? `${h.comm} ${h.unit}`.trim() : d.title;
+      { const pv = $('#f-price', sheet).value.replace(/[^\d.]/g, ''); d.deal_price = pv === '' ? null : Number(pv); }
       d.owner_name = d.type === '新房' ? '' : $('#f-owner', sheet).value.trim(); d.partner = d.type === '合作' ? $('#f-partner', sheet).value.trim() : ''; d.customer_name = $('#f-cust', sheet).value.trim();
       ['incomes', 'expenses'].forEach((k) => {
         d[k] = [...sheet.querySelectorAll(`input[type=checkbox][data-kind=${k}]`)].filter((c) => c.checked).flatMap((c) => {
@@ -529,6 +531,7 @@
     function preview() {
       collect();
       $('#listing-box', sheet).hidden = C.oneSide(d.type);
+      $('#price-l', sheet).textContent = d.type === '租房' ? '成交租金（元/月）' : '成交价（万元）'; $('#f-price', sheet).placeholder = d.type === '租房' ? '例如：2600' : '例如：168';
       $('#client-h', sheet).textContent = d.type === '合作' ? '这一单的业务员（可多选，平分业务员那一半）' : '客户方业务员（可多选）';
       $('#partner-box', sheet).hidden = d.type !== '合作';
       $('#income-tip', sheet).textContent = d.type === '合作' ? '只有“合作总佣金”和合作中介对半分。返点和其他收入不给合作中介、不扣 10%，全部是店面一半、这一单的业务员平分一半。'
@@ -932,6 +935,8 @@
   const feedbackHTML = (fb) => (fb && fb.length) ? `<div class="fb-list">${fb.slice().reverse().map((x) => `<div class="fb"><div class="small muted"><b>${esc(x.author)}</b>　${fmtTime(x.created_at)}</div><div>${esc(x.content)}</div></div>`).join('')}</div>` : '<div class="small muted">还没有反馈</div>';
   const L_STATUS = { active: (k) => k === '出租' ? '在租' : '在售', done: (k) => k === '出租' ? '已租' : '已售', off: () => '下架' };
   const houseKey = (x) => ((x.community || '') + '|' + (x.unit || '')).replace(/\s/g, '');
+  const dealPrice = (x) => { const d = state.deals.filter((y) => y.listing_id === x.id && !y.parent_id && y.deal_price != null).sort((a, b) => b.deal_date.localeCompare(a.deal_date))[0]; return d ? d.deal_price : null; };
+  const soldText = (x, v) => `成交 ${Number(v).toLocaleString()} ${x.kind === '出租' ? '元/月' : '万'}`;
   const priceText = (x) => x.price == null || x.price === '' ? '价格未填' : x.kind === '出租' ? `${Number(x.price).toLocaleString()} 元/月` : `${Number(x.price).toLocaleString()} 万`;
   const lTag = (k) => `<span class="tc ${k === '出租' ? 'tt-b' : 'tt-a'}">${k === '出租' ? '出租' : '出售'}</span>`;
   // ===== 房源：店面和业务员两边共用（改的时候两个文件一起改） =====
@@ -991,15 +996,16 @@
     const F = state.lf = { ...LF0, q: '', ...state.lf };
     const list = state.listings.filter((x) => matchListing(x, F));
     const hasDeal = (x) => state.deals.some((d) => d.listing_id === x.id);
-    const card = (x) => `<div class="card listing${x.status === 'active' ? '' : ' off'}" data-l="${x.id}" role="button" tabindex="0">
-        <div class="row" style="gap:10px;flex-wrap:nowrap">${lTag(x.kind)}
+    const card = (x) => `<div class="card listing${x.status === 'off' ? ' off' : x.status === 'done' ? ' done' : ''}" data-l="${x.id}" role="button" tabindex="0">
+        ${x.status === 'done' ? `<span class="seal" aria-label="已成交">${x.kind === '出租' ? '已租' : '已售'}</span>` : ''}
+        <div class="row" style="gap:10px;flex-wrap:nowrap">${lTag(x.kind)}${x.photo_thumb ? `<img class="lthumb" data-lphoto="${x.id}" src="${x.photo_thumb}" alt="房子照片">` : ''}
           <div class="grow" style="min-width:0;text-align:left"><b style="font-size:18px">${esc(x.community || '（没写小区）')} ${esc(x.unit)}</b>
             <div class="small muted">${x.needs_info ? '<span class="pill warn">等维护人补全</span>' : specLine(x)}</div></div>
-          <div style="text-align:right;flex:none"><b class="num" style="font-size:18px;color:var(--accent)">${priceText(x)}</b><div class="small muted">${L_STATUS[x.status](x.kind)}</div></div></div>
+          <div style="text-align:right;flex:none">${dealPrice(x) != null ? `<b class="num" style="font-size:18px;color:#c0392b">${soldText(x, dealPrice(x))}</b><div class="small muted">挂牌 ${priceText(x)}</div>` : `<b class="num" style="font-size:18px;color:var(--accent)">${priceText(x)}</b><div class="small muted">${L_STATUS[x.status](x.kind)}</div>`}</div></div>
         <div class="small muted" style="text-align:left">房源维护人 ${esc((x.agents || []).join('、') || '—')} · 房东 ${esc((x.owners || []).map((o) => o.name).filter(Boolean).join('、') || '—')} · <span class="num">${esc(x.created_at)}</span></div>
         ${x.note ? `<div class="small" style="text-align:left">${esc(x.note)}</div>` : ''}
         ${(x.feedback || []).length ? `<div class="small muted" style="text-align:left">最新反馈（共 ${x.feedback.length} 条）：${esc(x.feedback[x.feedback.length - 1].author)}：${esc(x.feedback[x.feedback.length - 1].content)}</div>` : ''}
-        ${x.status === 'active' && !hasDeal(x) ? `<div class="row" style="justify-content:flex-end"><button class="btn-primary" data-ldeal="${x.id}">成交了，去记账 ›</button></div>` : hasDeal(x) ? '<div class="small muted" style="text-align:right">已经记过账</div>' : ''}</div>`;
+        ${x.status === 'active' && !hasDeal(x) ? `<div class="row" style="justify-content:flex-end"><button class="btn-primary" data-ldeal="${x.id}">成交了，去记账 ›</button></div>` : ''}</div>`;
     shell(`
       <button class="add-listing" id="ladd"><span class="plus">＋</span><span><b>录入新房源</b><span class="small">同一套房子只能录一次</span></span></button>
       ${filterCard(F, state.listings, ['active', 'done', 'off'])}
@@ -1008,7 +1014,7 @@
     $('#ladd').onclick = () => openListing(null);
     bindFilter(app, F, renderListings);
     app.querySelectorAll('[data-l]').forEach((b) => {
-      const go = (e) => { if (e.target.closest('a.tel')) return; const x = state.listings.find((y) => String(y.id) === b.dataset.l); if (e.target.closest('[data-ldeal]')) dealFromListing(x); else openListing(x); };
+      const go = (e) => { if (e.target.closest('a.tel')) return; if (e.target.closest('[data-lphoto]')) { e.stopPropagation(); return Photo.show(S.listingPhoto(Number(b.dataset.l))); } const x = state.listings.find((y) => String(y.id) === b.dataset.l); if (e.target.closest('[data-ldeal]')) dealFromListing(x); else openListing(x); };
       b.onclick = go; b.onkeydown = (e) => { if (e.key === 'Enter') go(e); };
     });
   }
@@ -1037,6 +1043,7 @@
         <h2>${src ? '房源' : '录入新房源'}</h2>
         ${x.needs_info ? `<div class="notice">这套是记账时自动建的，户型、面积这些还没填。房源维护人（${esc(x.agents.join('、') || '还没选')}）的后台会提示他们补全，谁先补完算谁的。你在这里直接填好保存也行。</div>`
           : x.filled_by ? `<div class="small muted">记账时自动建的，${esc(x.filled_by)} 补全了详细信息</div>` : ''}
+        <div class="card stack" id="ph-box" style="gap:8px"></div>
         <div class="card stack">
           <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
           <label class="field">小区<select id="l-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
@@ -1064,7 +1071,7 @@
             <div class="small muted" id="ag-tip">${agentsLocked ? '已锁定。第一次填好后就不能随便改，确实要换人请点“修改”（只有店面能改，业务员那边改不了）。' : '第一次保存后就会锁定。'}</div>
             <div class="chips" id="ag-chips">${chipsHTML()}</div></div>
           <label class="field">状态<select id="l-status">${['active', 'done', 'off'].map((s) => `<option value="${s}" ${x.status === s ? 'selected' : ''}>${L_STATUS[s](x.kind)}</option>`).join('')}</select></label>
-          ${deals.length ? `<div class="notice">这套房子已经记账：${deals.map((d) => `${esc(d.deal_date)} ${esc(d.title || d.type)}`).join('；')}</div>` : ''}
+          ${deals.length ? `<div class="notice">这套房子已经记账：${deals.map((d) => `${esc(d.deal_date)} ${esc(d.title || d.type)}${d.deal_price != null ? '，' + soldText(x, d.deal_price) : '（成交价还没填，到记账里这一单填）'}`).join('；')}</div>` : ''}
         </div>
         <div class="card stack"><h3>备注</h3>
           <textarea id="l-note" rows="2" placeholder="例如：满五唯一、钥匙在店里、随时看房" aria-label="备注">${esc(x.note)}</textarea>
@@ -1077,6 +1084,7 @@
       </div>
       <div class="sheet-actions"><button id="l-cancel">取消</button>${src ? '<button id="l-del" class="btn-danger">删除</button>' : ''}<button id="l-save" class="btn-primary">保存</button></div>`, '房源');
     const close = () => sheet.remove();
+    const phField = Photo.field($('#ph-box', sheet), x.photo_thumb, () => S.listingPhoto(x.id));
     const num = (v) => { v = String(v).replace(/[^\d.]/g, ''); return v === '' ? null : Number(v); };
     const int = (v) => v === '' ? null : Number(v);
     const commVal = () => { const v = $('#l-comm-sel', sheet).value; return (v === '__other' ? $('#l-comm', sheet).value : v).trim(); };
@@ -1130,6 +1138,7 @@
         const d = state.deals.find((y) => String(y.id) === ln.dataset.deal), cn = ln.querySelector('[data-cn]').value.trim(), cp = ln.querySelector('[data-cp]').value.trim();
         if (d && (cn !== (d.customer_name || '') || cp !== (d.customer_phone || ''))) await run(() => S.setCustomer(d.id, cn, cp));
       }
+      const pc = phField.changed(); if (pc !== undefined) { x.photo = pc ? pc.photo : ''; x.photo_thumb = pc ? pc.photo_thumb : ''; }
       await run(() => S.saveListing(x)); await loadAll(); return true;
     };
     $('#l-cancel', sheet).onclick = close;

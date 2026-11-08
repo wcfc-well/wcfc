@@ -355,6 +355,7 @@ begin
   if not found then return null; end if;
   return coalesce((select json_agg(to_jsonb(l) || jsonb_build_object(
       'mine', a.name = any(l.agents),
+      'deal_price', (select d.deal_price from deals d where d.listing_id = l.id and d.parent_id is null and d.deal_price is not null order by d.deal_date desc, d.id desc limit 1),
       'feedback', coalesce((select jsonb_agg(to_jsonb(f) order by f.created_at) from listing_feedback f where f.listing_id = l.id), '[]'::jsonb)
     ) order by l.created_at desc, l.id desc) from listings l where l.status <> 'off'), '[]'::json);
 end $$;
@@ -416,6 +417,7 @@ begin
         case when coalesce(p->>'note', '') <> '' then jsonb_build_array(jsonb_build_object('by', a.name, 'at', now(), 'note', p->>'note')) else '[]' end,
         a.name, a.name)
       returning id into new_id;
+      if p ? 'photo' then perform listing_set_photo(new_id, p); end if;
       return new_id;
     end if;
     select * into l from listings where id = p_id for update;
@@ -430,6 +432,7 @@ begin
       filled_at = case when l.needs_info and (coalesce(p->>'category', '') <> '' or nullif(p->>'area', '') is not null) then now() else filled_at end,
       updated_by = a.name, updated_at = now()
     where id = p_id;
+    if p ? 'photo' then perform listing_set_photo(p_id, p); end if;
     return p_id;
   exception when unique_violation then
     raise exception '系统里已经有这套房子了，不能重复录入';
@@ -456,6 +459,8 @@ grant execute on function aunt_set_customer(text, bigint, text, text) to anon, a
 
 -- ---------- 2026-11-08：补记晚到的返点（单独一笔，挂在原单下面，只让分这笔钱的业务员确认） ----------
 alter table deals add column if not exists parent_id bigint references deals(id) on delete set null;
+-- 成交价：出售是万元，租房是元/月（周姐记账时填，房源里已成交的房子显示这个价）
+alter table deals add column if not exists deal_price numeric;
 
 -- ---------- 2026-11-08：新加“合作”类型（和别的中介合作，总佣金对半分），记下合作的中介名字 ----------
 alter table deals drop constraint if exists deals_type_check;
@@ -482,6 +487,44 @@ create trigger deals_auto_confirm after insert or update on deals for each row e
 insert into storage.buckets (id, name, public) values ('exports', 'exports', false) on conflict (id) do nothing;
 drop policy if exists exports_rw on storage.objects;
 create policy exports_rw on storage.objects for all to authenticated using (bucket_id = 'exports') with check (bucket_id = 'exports');
+
+-- ---------- 2026-11-08：房源照片（一套房一张）。列表只带小图，点开再取大图 ----------
+alter table listings add column if not exists photo_thumb text not null default '';
+create table if not exists listing_photos (
+  listing_id bigint primary key references listings(id) on delete cascade,
+  data text not null,
+  updated_at timestamptz not null default now()
+);
+alter table listing_photos enable row level security;
+drop policy if exists shop_all on listing_photos; create policy shop_all on listing_photos for all to authenticated using (true) with check (true);
+-- p = {photo, photo_thumb}；photo 为空就是删掉照片
+create or replace function listing_set_photo(p_id bigint, p jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(p->>'photo', '') = '' then
+    delete from listing_photos where listing_id = p_id;
+    update listings set photo_thumb = '' where id = p_id;
+    return;
+  end if;
+  if left(p->>'photo', 23) <> 'data:image/jpeg;base64,' or length(p->>'photo') > 2000000
+     or left(coalesce(p->>'photo_thumb', ''), 23) <> 'data:image/jpeg;base64,' or length(p->>'photo_thumb') > 200000 then
+    raise exception '照片格式不对，请重新选一张';
+  end if;
+  insert into listing_photos (listing_id, data, updated_at) values (p_id, p->>'photo', now())
+  on conflict (listing_id) do update set data = excluded.data, updated_at = now();
+  update listings set photo_thumb = p->>'photo_thumb' where id = p_id;
+end $$;
+revoke all on function listing_set_photo(bigint, jsonb) from public, anon;
+grant execute on function listing_set_photo(bigint, jsonb) to authenticated;
+-- 业务员看大图（所有业务员都能看所有房源）
+create or replace function aunt_listing_photo(p_token text, p_id bigint) returns text
+language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from agents where device_token = p_token and active) then raise exception '请重新登记'; end if;
+  return (select data from listing_photos where listing_id = p_id);
+end $$;
+revoke all on function aunt_listing_photo(text, bigint) from public;
+grant execute on function aunt_listing_photo(text, bigint) to anon, authenticated;
 
 -- ---------- 2026-11-08：以前记的账补进房源（房源功能上线前记的单子没有房源，这里一次性补上，以后重复跑也不会重复建） ----------
 do $$
