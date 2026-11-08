@@ -307,6 +307,10 @@
       listNudges: () => q(sb.from('nudges').select('*').order('created_at', { ascending: false }).limit(300)),
       nudge: (names) => q(sb.from('nudges').insert(names.map((n) => ({ agent_name: n })))),
       auntNudgeSeen: () => q(sb.rpc('aunt_nudge_seen', { p_token: token() })),
+      // 锁屏通知：业务员登记这台手机；店面催办时让云端发通知
+      auntPushSubscribe: (s) => q(sb.rpc('aunt_push_subscribe', { p_token: token(), p_endpoint: s.endpoint, p_p256dh: s.keys.p256dh, p_auth: s.keys.auth })),
+      listPushSubs: () => q(sb.from('push_subs').select('agent_name, created_at')),
+      async pushNudge(items) { const r = await sb.functions.invoke('push', { body: { items } }); if (r.error) throw new Error('锁屏通知没发出去'); return r.data; },
 
       auntNames: () => q(sb.rpc('aunt_names')),
       async auntBind(name, phone4) {

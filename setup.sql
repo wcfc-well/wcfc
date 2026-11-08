@@ -617,3 +617,26 @@ begin
   ) into r;
   return r;
 end $$;
+
+-- ---------- 2026-11-08：锁屏通知（iPhone 从桌面图标打开、允许通知后，店面催办会推到锁屏） ----------
+create table if not exists push_subs (
+  endpoint text primary key,
+  agent_name text not null,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+alter table push_subs enable row level security;
+drop policy if exists shop_all on push_subs; create policy shop_all on push_subs for all to authenticated using (true) with check (true);
+create or replace function aunt_push_subscribe(p_token text, p_endpoint text, p_p256dh text, p_auth text) returns void
+language plpgsql security definer set search_path = public as $$
+declare a agents;
+begin
+  select * into a from agents where device_token = p_token and active;
+  if not found then raise exception '请重新登记'; end if;
+  if coalesce(p_endpoint, '') !~ '^https://' then raise exception '通知登记失败'; end if;
+  insert into push_subs (endpoint, agent_name, p256dh, auth) values (p_endpoint, a.name, p_p256dh, p_auth)
+  on conflict (endpoint) do update set agent_name = excluded.agent_name, p256dh = excluded.p256dh, auth = excluded.auth, created_at = now();
+end $$;
+revoke all on function aunt_push_subscribe(text, text, text, text) from public;
+grant execute on function aunt_push_subscribe(text, text, text, text) to anon, authenticated;

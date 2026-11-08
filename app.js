@@ -43,7 +43,7 @@
   }
 
   async function loadAll() {
-    [state.agents, state.deals, state.settlements, state.confs, state.listings, state.nudges] = await Promise.all([S.listAgents(), S.listDeals(), S.listSettlements(), S.listConfirmations(), S.listListings().catch(() => []), (S.listNudges ? S.listNudges() : Promise.resolve([])).catch(() => [])]);
+    [state.agents, state.deals, state.settlements, state.confs, state.listings, state.nudges, state.pushSubs] = await Promise.all([S.listAgents(), S.listDeals(), S.listSettlements(), S.listConfirmations(), S.listListings().catch(() => []), (S.listNudges ? S.listNudges() : Promise.resolve([])).catch(() => []), (S.listPushSubs ? S.listPushSubs() : Promise.resolve([])).catch(() => [])]);
     const ids = new Set(state.deals.filter(canSettle).map((d) => d.id));
     state.selected.forEach((id) => { if (!ids.has(id)) state.selected.delete(id); });
   }
@@ -336,15 +336,16 @@
     const LBL = { confirm: '单没确认', cust: '单缺客户电话', fill: '套房源要补资料', owner: '套没留房东电话', stale: '套房源 30 天没跟进' };
     const perNames = sortNames(Object.keys(t.per));
     const lastNudge = (n) => (state.nudges || []).find((x) => x.agent_name === n);
+    const hasPush = (n) => (state.pushSubs || []).some((x) => x.agent_name === n);
     const nudgeTxt = (n) => { const x = lastNudge(n); if (!x) return ''; const d = new Date(x.created_at), p = (v) => String(v).padStart(2, '0');
       return `<span class="small muted">${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())} 催过，${x.seen_at ? '她已经看到了' : '她还没打开看'}</span>`; };
-    const nudgeRows = perNames.map((n) => `<div class="nudge-row"><div class="grow"><button class="linkish" data-a="${esc(n)}"><b>${esc(n)}</b></button>
+    const nudgeRows = perNames.map((n) => `<div class="nudge-row"><div class="grow"><button class="linkish" data-a="${esc(n)}"><b>${esc(n)}</b></button>${hasPush(n) ? ' <span class="small muted">🔔 锁屏能收到</span>' : ''}
         <div class="small">${Object.entries(t.per[n]).filter(([, v]) => v).map(([k, v]) => `<b class="num">${v}</b> ${LBL[k]}`).join('，')}</div>${nudgeTxt(n)}</div>
         </div>`).join('');
     shell(`
       <div class="card stack" style="gap:6px"><h2 style="margin:0">待办</h2><div class="small muted">哪些事还没做完、卡在谁那里，一页看清。点名字或单子直接打开。</div></div>
       ${perNames.length ? `<button class="btn-primary btn-block" id="nudge-all" style="font-size:19px;min-height:54px">🔔 一起催办（${perNames.length} 人）</button>` : ''}
-      ${sec('按人看', perNames.length, '每个人还有几件事没做。点上面“一起催办”，这些人下次打开业务员页都会弹出提醒，写着她自己还有哪些没做。', nudgeRows, '大家手上都没有没做完的事。')}
+      ${sec('按人看', perNames.length, '每个人还有几件事没做。点上面“一起催办”：开了锁屏提醒的（🔔）手机锁屏马上收到；没开的下次打开业务员页会弹出提醒。', nudgeRows, '大家手上都没有没做完的事。')}
       ${sec('等业务员确认', t.confirming.length, `${t.confirming.length} 单还在等确认。下面是每个人还有几单没点确认，可以在群里提醒一下。`, unconfRows, '所有发出去的单子都确认完了。')}
       ${sec('客户信息没填', t.noCust.length, '客户方业务员确认时会填。下面按客户方业务员列出来，同一单有几个人的话谁填都行。', custRows, '每一单的客户名字、电话都有了。')}
       ${sec('房源待补全', t.needInfo.length, '记账时自动建的房源，只有小区和坐落，等房源维护人补户型、面积。', needRows, '没有要补全的房源。')}
@@ -358,7 +359,15 @@
     app.querySelectorAll('[data-l]').forEach((b) => b.onclick = () => openListing(state.listings.find((l) => String(l.id) === b.dataset.l)));
     app.querySelectorAll('[data-a]').forEach((b) => b.onclick = () => openAgent(b.dataset.a));
     if ($('#go-settle')) $('#go-settle').onclick = () => { state.tab = 'settle'; render(); };
-    const doNudge = async (names, btn) => { btn.disabled = true; btn.textContent = '正在发…'; await run(() => S.nudge(names)); await loadAll(); renderTodo(); toast(`已经催了 ${names.length} 个人`); };
+    const bodyOf = (n) => '您还有 ' + Object.entries(t.per[n]).filter(([, v]) => v).map(([k, v]) => v + ' ' + LBL[k]).join('，') + '。点开处理一下。';
+    const doNudge = async (names, btn) => {
+      btn.disabled = true; btn.textContent = '正在发…';
+      try { await run(() => S.nudge(names)); } catch (e) { btn.disabled = false; btn.textContent = '再试一次'; return; }
+      let pushed = null;
+      if (S.pushNudge) { try { pushed = await S.pushNudge(names.map((n) => ({ name: n, body: bodyOf(n) }))); } catch (e) { pushed = null; } }
+      await loadAll(); renderTodo();
+      toast(`已经催了 ${names.length} 个人` + (pushed ? (pushed.sent ? `，其中 ${pushed.sent} 人手机锁屏收到通知` : '，没人开锁屏提醒，她们打开页面时会看到') : ''));
+    };
     if ($('#nudge-all')) $('#nudge-all').onclick = (e) => doNudge(perNames, e.currentTarget);
   }
 

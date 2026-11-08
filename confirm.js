@@ -20,6 +20,37 @@
   const LST = { active: (k) => k === '出租' ? '在租' : '在售', done: (k) => k === '出租' ? '已租' : '已售' };
   // 底部标签，和店面那边一样放在最下面
   const tabs = () => `<nav class="tabbar tabbar3" aria-label="主菜单"><button data-view="todo" aria-current="${view === 'todo'}">待办${todoN ? ` <span class="todo-n">${todoN}</span>` : ''}</button><button data-view="listings" aria-current="${view === 'listings'}">房源</button><button data-view="stmt" aria-current="${view === 'stmt'}">我的结算</button></nav>`;
+
+  // ===== 锁屏通知（iPhone 要先添加到主屏幕、从桌面图标打开） =====
+  const CFG = window.APP_CONFIG || {};
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const standalone = () => navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  const pushOK = () => !!(CFG.pushPublicKey && S.auntPushSubscribe && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window);
+  const b64u = (s) => { const p = '='.repeat((4 - s.length % 4) % 4), r = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(r, (ch) => ch.charCodeAt(0)); };
+  async function pushSubscribe() {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(CFG.pushPublicKey) });
+    await S.auntPushSubscribe(sub.toJSON());
+  }
+  let pushSynced = false;
+  function pushCard() {
+    if (!pushOK()) return isIOS && !standalone() && CFG.pushPublicKey ? `<div class="card small stack" style="gap:4px"><b>🔔 想在锁屏上收到店面提醒？</b><span>点 Safari 底部的分享按钮 <b>⬆︎</b>，选“添加到主屏幕”，以后从桌面上的“文城业务员”打开，这里会出现“打开锁屏提醒”。</span></div>` : '';
+    if (Notification.permission === 'granted') { if (!pushSynced) { pushSynced = true; pushSubscribe().catch(() => {}); } return ''; }
+    if (Notification.permission === 'denied') return '<div class="card small muted">锁屏提醒被关掉了。想打开的话：手机“设置 → 通知 → 文城业务员”，打开“允许通知”。</div>';
+    return `<div class="card stack" style="gap:6px"><b>🔔 打开锁屏提醒</b><span class="small">店里催您确认、补资料时，手机锁屏上会像微信消息一样弹出来。</span><button class="btn-primary btn-block" id="push-on">打开锁屏提醒</button></div>`;
+  }
+  function bindPush() {
+    const b = $('#push-on'); if (!b) return;
+    b.onclick = async () => {
+      b.disabled = true; b.textContent = '正在打开…';
+      try {
+        const p = await Notification.requestPermission();
+        if (p !== 'granted') { b.textContent = '没有允许，以后可以在手机设置里打开'; return; }
+        await pushSubscribe(); pushSynced = true;
+        b.textContent = '已打开 ✓ 以后店里催办会推到锁屏';
+      } catch (e) { b.disabled = false; b.textContent = '没打开成功，再试一次'; }
+    };
+  }
   // 店面催办：打开页面时弹一个框，写着还有哪些事没做
   function showNudge(n, items) {
     const left = items.filter(([k]) => k > 0);
@@ -350,6 +381,7 @@
     const waitTxt = (x) => { const w = (x.waiting || []).filter((n) => n !== name); return w.length ? `还在等 ${esc(w.join('、'))} 确认` : '还在等其他人确认'; };
     const todoHTML = `
       <h1>${esc(name)}，您好</h1>
+      ${pushCard()}
       <div id="err" class="notice err" hidden></div>
       ${todoN ? '' : '<div class="card" style="font-size:18px">现在没有要做的事 ✓</div>'}
       ${pending.length ? `<h2>请您确认（${pending.length} 单）</h2>${pendingHTML}` : ''}
@@ -379,6 +411,7 @@
       ${view === 'todo' ? todoHTML : stmtHTML}
     </div>${tabs()}`;
     bindDemo(); bindTabs();
+    bindPush();
     if ($('#go-todo')) $('#go-todo').onclick = () => { view = 'todo'; start(); };
     app.querySelectorAll('[data-fill]').forEach((b) => b.onclick = () => editListing(allL.find((x) => String(x.id) === b.dataset.fill), allL));
     app.querySelectorAll('[data-ldet]').forEach((b) => b.onclick = () => listingDetail(allL.find((x) => String(x.id) === b.dataset.ldet), allL));
