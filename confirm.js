@@ -16,9 +16,22 @@
   const demoBar = () => S.mode === 'demo' ? '<div class="notice small">演示模式：数据只在这台设备上。<button id="demo-switch" style="min-height:0;padding:2px 8px;font-size:14px">换一个人试试</button> <a href="index.html">回到店面记账</a></div>' : '';
   const bindDemo = () => { const b = $('#demo-switch'); if (b) b.onclick = () => { S.demoForget(); start(); }; };
 
-  let view = 'stmt';
+  let view = 'todo', todoN = 0, nudgeShown = false;
   const LST = { active: (k) => k === '出租' ? '在租' : '在售', done: (k) => k === '出租' ? '已租' : '已售' };
-  const tabs = () => `<div class="ctabs"><button data-view="listings" aria-pressed="${view === 'listings'}">房源</button><button data-view="stmt" aria-pressed="${view === 'stmt'}">我的结算</button></div>`;
+  const tabs = () => `<div class="ctabs"><button data-view="todo" aria-pressed="${view === 'todo'}">待办${todoN ? ` <span class="todo-n">${todoN}</span>` : ''}</button><button data-view="listings" aria-pressed="${view === 'listings'}">房源</button><button data-view="stmt" aria-pressed="${view === 'stmt'}">我的结算</button></div>`;
+  // 店面催办：打开页面时弹一个框，写着还有哪些事没做
+  function showNudge(n, items) {
+    const left = items.filter(([k]) => k > 0);
+    const t = new Date(n.created_at); const p = (x) => String(x).padStart(2, '0');
+    const ov = document.createElement('div'); ov.className = 'img-ov';
+    ov.innerHTML = `<div class="img-box" role="alertdialog" aria-label="店面提醒"><div style="font-size:20px"><b>🔔 店面提醒您</b></div>
+      <div class="small muted">${t.getMonth() + 1}月${t.getDate()}日 ${p(t.getHours())}:${p(t.getMinutes())}</div>
+      ${left.length ? `<div style="font-size:18px">您还有：</div><div class="stack" style="gap:4px;font-size:18px">${left.map(([k, s]) => `<div>· <b class="num" style="color:var(--seal)">${k}</b> ${s}</div>`).join('')}</div>`
+        : '<div style="font-size:18px">您已经都做完了 ✓</div>'}
+      <button class="btn-primary btn-block" data-go style="font-size:19px;min-height:52px">${left.length ? '去处理' : '知道了'}</button></div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('[data-go]').onclick = () => { ov.remove(); S.auntNudgeSeen().catch(() => {}); if (view !== 'todo') { view = 'todo'; start(); } };
+  }
   const bindTabs = () => app.querySelectorAll('[data-view]').forEach((b) => b.onclick = () => { view = b.dataset.view; start(); });
   const fmtTime = (t) => { if (!t) return ''; const d = new Date(t); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
   // ===== 房源：店面和业务员两边共用（改的时候两个文件一起改） =====
@@ -281,7 +294,8 @@
     const st = await S.auntStatement();
     if (!st) return pickName();
     const { name, deals, settlements } = st;
-    const toFill = ((await S.auntListings().catch(() => [])) || []).filter((x) => x.needs_info && x.mine);
+    const allL = (await S.auntListings().catch(() => [])) || [];
+    const toFill = allL.filter((x) => x.needs_info && x.mine && x.status !== 'off');
     const pending = deals.filter((x) => x.deal.status === 'confirming' && !(x.confirmation && x.confirmation.status === 'ok'));
     const waitingOthers = deals.filter((x) => x.deal.status === 'confirming' && x.confirmation && x.confirmation.status === 'ok');
     const unsettled = deals.filter((x) => x.deal.status === 'locked' && !x.deal.settlement_id);
@@ -320,28 +334,54 @@
         <div class="stack" style="gap:4px;margin-top:8px">${listRows(list)}</div></details>`;
     }).join('');
 
-    app.innerHTML = `<div class="wrap stack" style="max-width:560px">
-      ${demoBar()}${tabs()}
+    // 待办：只放要她动手做的事；我的结算：只放钱
+    const lastTouch = (l) => [l.updated_at, l.note_at, l.created_at, ...(l.feedback || []).map((f) => f.created_at)].filter(Boolean).sort().pop();
+    const daysSince = (t) => t ? Math.floor((Date.now() - new Date(t).getTime()) / 86400000) : 0;
+    const phoneOK = (p) => (p || '').replace(/\D/g, '').length >= 7;
+    const myLive = allL.filter((x) => x.mine && x.status === 'active');
+    const stale = myLive.filter((x) => !x.needs_info && daysSince(lastTouch(x)) >= 30);
+    const noOwner = myLive.filter((x) => !x.needs_info && (!(x.owners || []).length || (x.owners || []).some((o) => !phoneOK(o.phone))));
+    const oldNoCust = deals.filter((x) => !x.deal.parent_id && x.deal.client_agents.includes(name) && x.confirmation && x.confirmation.status === 'ok'
+      && (!(x.deal.customer_name || '').trim() || !phoneOK(x.deal.customer_phone)));
+    todoN = pending.length + toFill.length + stale.length + noOwner.length + oldNoCust.length;
+    const lbtn = (x, attr, right) => `<button class="todo-btn" ${attr}="${x.id}"><span>${esc(x.community)} ${esc(x.unit)}</span><span>${right} ›</span></button>`;
+    const block = (n, unit, title, hint, body) => `<div class="todo-card stack" style="gap:8px"><div class="todo-head"><span class="todo-num">${n}</span><b>${unit}${title}</b></div>${hint ? `<div class="small">${hint}</div>` : ''}${body}</div>`;
+    const waitTxt = (x) => { const w = (x.waiting || []).filter((n) => n !== name); return w.length ? `还在等 ${esc(w.join('、'))} 确认` : '还在等其他人确认'; };
+    const todoHTML = `
       <h1>${esc(name)}，您好</h1>
-      ${toFill.length ? `<button class="todo-card todo-link" id="go-fill"><div class="todo-head"><span class="todo-num">${toFill.length}</span><b>套房子的资料要您补一下 ›</b></div><div class="small">店里记账时自动建的，只有小区和坐落。您是房源维护人，请补上户型、面积这些。</div></button>` : ''}
-      <div class="card stack" style="gap:4px"><div class="row between"><span>我一共成交</span><b class="num" style="font-size:22px">${deals.length} 单</b></div>
-        <div class="row between small muted"><span>全部应得合计</span><span class="num">¥${C.fmt(sumOf(deals))}</span></div>
-        <div class="small muted">每一单都在下面，按状态分开列出。</div></div>
       <div id="err" class="notice err" hidden></div>
-      <h2>请您确认（${pending.length} 单）</h2>
-      ${pendingHTML || '<div class="card muted">现在没有要确认的单子。</div>'}
-      <h2>已确认（等店面统一结算）</h2>
+      ${todoN ? '' : '<div class="card" style="font-size:18px">现在没有要做的事 ✓</div>'}
+      ${pending.length ? `<h2>请您确认（${pending.length} 单）</h2>${pendingHTML}` : ''}
+      ${toFill.length ? block(toFill.length, '套房子', '的资料要您补一下', '店里记账时自动建的，只有小区和坐落。您是房源维护人，请补上户型、面积这些。', toFill.map((x) => lbtn(x, 'data-fill', '去补资料')).join('')) : ''}
+      ${noOwner.length ? block(noOwner.length, '套房子', '没留房东电话', '您是这几套房的维护人，请把房东名字、电话补上。', noOwner.map((x) => lbtn(x, 'data-fill', '去补电话')).join('')) : ''}
+      ${stale.length ? block(stale.length, '套房子', '30 天没跟进了', '您是维护人。问一下房东房子还卖不卖、价格变没变，点进去写一条联系反馈就行。', stale.map((x) => lbtn(x, 'data-ldet', daysSince(lastTouch(x)) + ' 天没动静')).join('')) : ''}
+      ${oldNoCust.length ? block(oldNoCust.length, '单', '还缺客户电话', '您是这几单的客户方业务员，请补上客户名字、电话（店里留存）。', oldNoCust.map((x) => `<div class="small"><b>${esc(x.deal.title)}</b> <span class="muted num">${x.deal.deal_date}</span></div>${custBox(x.deal)}`).join('')) : ''}`;
+    const stmtHTML = `
+      <h1>${esc(name)}，您好</h1>
+      ${pending.length ? `<button class="todo-card todo-link" id="go-todo"><div class="todo-head"><span class="todo-num">${pending.length}</span><b>单等您确认，去待办 ›</b></div></button>` : ''}
+      <div class="card stack" style="gap:4px"><div class="row between"><span>我一共成交</span><b class="num" style="font-size:22px">${deals.length} 单</b></div>
+        <div class="row between small muted"><span>全部应得合计</span><span class="num">¥${C.fmt(sumOf(deals))}</span></div></div>
+      <div id="err" class="notice err" hidden></div>
+      <h2>下次结算</h2>
       <div class="card confirmed stack" style="gap:6px">
         <div class="row between"><span>下次结算您应得</span><b class="num" style="font-size:26px">¥${C.fmt(sumOf(unsettled))}</b></div>
+        <div class="small muted">大家都确认好了，等店面统一结算：</div>
         ${listRows(unsettled) || '<div class="muted small">还没有</div>'}
-        ${waitingOthers.length ? `<div class="small muted">另外有 ${waitingOthers.length} 单您已确认，还在等其他人确认：</div>${listRows(waitingOthers)}` : ''}
       </div>
+      ${waitingOthers.length ? `<h2>您已确认，等别人确认（${waitingOthers.length} 单）</h2>
+      <div class="card stack" style="gap:6px">${waitingOthers.map((x) => `${listRows([x])}<div class="small" style="color:var(--seal)">${waitTxt(x)}</div>`).join('')}</div>` : ''}
       <h2>已结算</h2>
       ${stlHTML || '<div class="card muted">还没有结算过。</div>'}
-      <div class="small muted">规则：每单收入减支出是总账，再扣店面维护是纯利润（只扣佣金部分的 10%，返点不扣；新房不扣）；佣金部分的纯利润房源方 20%、客户方 80%（新房全算客户方）；返点直接归一方：银行、装修返点归客户方，垫资返点归房源方，其他收入看店里选的哪一方；合作单总佣金一半给合作中介，我们这一半店面和业务员各一半；每一块业务员拿一半，由这一单的业务员平分。</div>
+      <div class="small muted">规则：每单收入减支出是总账，再扣店面维护是纯利润（只扣佣金部分的 10%，返点不扣；新房不扣）；佣金部分的纯利润房源方 20%、客户方 80%（新房全算客户方）；返点直接归一方：银行、装修返点归客户方，垫资返点归房源方，其他收入看店里选的哪一方；合作单总佣金一半给合作中介，我们这一半店面和业务员各一半；每一块业务员拿一半，由这一单的业务员平分。</div>`;
+    app.innerHTML = `<div class="wrap stack" style="max-width:560px">
+      ${demoBar()}${tabs()}
+      ${view === 'todo' ? todoHTML : stmtHTML}
     </div>`;
     bindDemo(); bindTabs();
-    if ($('#go-fill')) $('#go-fill').onclick = () => { view = 'listings'; start(); };
+    if ($('#go-todo')) $('#go-todo').onclick = () => { view = 'todo'; start(); };
+    app.querySelectorAll('[data-fill]').forEach((b) => b.onclick = () => editListing(allL.find((x) => String(x.id) === b.dataset.fill), allL));
+    app.querySelectorAll('[data-ldet]').forEach((b) => b.onclick = () => listingDetail(allL.find((x) => String(x.id) === b.dataset.ldet), allL));
+    if (st.nudge && !nudgeShown) { nudgeShown = true; showNudge(st.nudge, [[pending.length, '单要您确认'], [toFill.length, '套房子要补资料'], [noOwner.length, '套房子没留房东电话'], [stale.length, '套房子 30 天没跟进'], [oldNoCust.length, '单还缺客户电话']]); }
     app.querySelectorAll('[data-csave]').forEach((b) => b.onclick = async () => {
       const ln = app.querySelector(`[data-cdeal="${b.dataset.csave}"]`), cn = ln.querySelector('[data-cn]').value.trim(), cp = ln.querySelector('[data-cp]').value.trim();
       if (!cn) { err('请填客户名字'); return; } if (cp.replace(/\D/g, '').length < 7) { err('请填正确的客户电话'); return; }

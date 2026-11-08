@@ -156,10 +156,15 @@
         if (!a) { ls.del(TOKEN_KEY); return null; }
         const deals = db.deals.filter((d) => d.status !== 'draft' && involves(d, a.name))
           .sort((x, y) => (y.deal_date + y.id).localeCompare(x.deal_date + x.id))
-          .map((d) => ({ deal: d, confirmation: db.confirmations.find((c) => c.deal_id === d.id && c.agent_name === a.name) || null }));
+          .map((d) => ({ deal: d, confirmation: db.confirmations.find((c) => c.deal_id === d.id && c.agent_name === a.name) || null,
+            waiting: people(d).filter((n) => !db.confirmations.some((c) => c.deal_id === d.id && c.agent_name === n && c.status === 'ok')) }));
         const sids = new Set(deals.map((x) => x.deal.settlement_id).filter(Boolean));
-        return clone({ name: a.name, deals, settlements: db.settlements.filter((s) => sids.has(s.id)).sort((x, y) => y.created_at.localeCompare(x.created_at)) });
+        const nudge = (db.nudges || []).filter((n) => n.agent_name === a.name && !n.seen_at).sort((x, y) => y.created_at.localeCompare(x.created_at))[0] || null;
+        return clone({ name: a.name, deals, nudge, settlements: db.settlements.filter((s) => sids.has(s.id)).sort((x, y) => y.created_at.localeCompare(x.created_at)) });
       },
+      async auntNudgeSeen() { const a = me(); if (!a) return; (db.nudges || []).forEach((n) => { if (n.agent_name === a.name && !n.seen_at) n.seen_at = new Date().toISOString(); }); save(); },
+      listNudges: () => ok((db.nudges || []).slice().sort((x, y) => y.created_at.localeCompare(x.created_at))),
+      async nudge(names) { db.nudges = db.nudges || []; names.forEach((n) => db.nudges.push({ id: ++db.seq, agent_name: n, created_at: new Date().toISOString(), seen_at: null })); save(); },
       async auntConfirm(dealId, status, note, cust) {
         const a = me();
         if (!a) return fail('请重新登记');
@@ -298,6 +303,10 @@
       createSettlement: (name, ids) => q(sb.rpc('create_settlement', { p_name: name, p_deal_ids: ids })),
       cancelSettlement: (id) => q(sb.from('settlements').delete().eq('id', id)),
       listConfirmations: () => q(sb.from('confirmations').select('*')),
+      // 催办：店面点“催一下”，业务员下次打开页面会弹出提醒
+      listNudges: () => q(sb.from('nudges').select('*').order('created_at', { ascending: false }).limit(300)),
+      nudge: (names) => q(sb.from('nudges').insert(names.map((n) => ({ agent_name: n })))),
+      auntNudgeSeen: () => q(sb.rpc('aunt_nudge_seen', { p_token: token() })),
 
       auntNames: () => q(sb.rpc('aunt_names')),
       async auntBind(name, phone4) {

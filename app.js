@@ -43,7 +43,7 @@
   }
 
   async function loadAll() {
-    [state.agents, state.deals, state.settlements, state.confs, state.listings] = await Promise.all([S.listAgents(), S.listDeals(), S.listSettlements(), S.listConfirmations(), S.listListings().catch(() => [])]);
+    [state.agents, state.deals, state.settlements, state.confs, state.listings, state.nudges] = await Promise.all([S.listAgents(), S.listDeals(), S.listSettlements(), S.listConfirmations(), S.listListings().catch(() => []), (S.listNudges ? S.listNudges() : Promise.resolve([])).catch(() => [])]);
     const ids = new Set(state.deals.filter(canSettle).map((d) => d.id));
     state.selected.forEach((id) => { if (!ids.has(id)) state.selected.delete(id); });
   }
@@ -302,7 +302,17 @@
     // 7. 草稿没发出去；8. 已确认等结算
     const drafts = state.deals.filter((d) => d.status === 'draft');
     const toSettle = state.deals.filter(canSettle).sort((x, y) => x.deal_date.localeCompare(y.deal_date));
-    return { unconf, confirming, noCust, needInfo, stale, noOwner, noPw, locked, unbound, drafts, toSettle };
+    // 按人汇总（催办用）：每个人还有几件事没做
+    const per = {};
+    const add = (n, k) => { if (!active.some((a) => a.name === n) || auto.has(n)) return; (per[n] = per[n] || { confirm: 0, cust: 0, fill: 0, stale: 0, owner: 0 })[k]++; };
+    Object.entries(unconf).forEach(([n, ds]) => ds.forEach(() => add(n, 'confirm')));
+    noCust.forEach((d) => { const ok = state.confs.filter((c) => c.deal_id === d.id && c.status === 'ok').map((c) => c.agent_name);
+      // 还没确认的客户方会在确认时填，这里只算已经确认过、但客户信息还空着的旧单子；没人确认过的算在“确认”里
+      d.client_agents.filter((n) => ok.includes(n)).forEach((n) => add(n, 'cust')); });
+    needInfo.forEach((l) => (l.agents || []).forEach((n) => add(n, 'fill')));
+    stale.forEach(({ l }) => (l.agents || []).forEach((n) => add(n, 'stale')));
+    noOwner.filter((l) => !l.needs_info).forEach((l) => (l.agents || []).forEach((n) => add(n, 'owner')));
+    return { unconf, confirming, noCust, needInfo, stale, noOwner, noPw, locked, unbound, drafts, toSettle, per };
   }
   function todoCount() {
     try { const t = todoData(); return t.confirming.length + t.noCust.length + t.needInfo.length + t.drafts.length + t.locked.length; } catch (e) { return 0; }
@@ -323,8 +333,17 @@
     const ownerRows = t.noOwner.slice(0, 30).map((l) => lBtn(l, (l.owners || []).length ? '有房东没留电话' : '没填房东')).join('') + (t.noOwner.length > 30 ? `<div class="small muted">还有 ${t.noOwner.length - 30} 套没列出来</div>` : '');
     const agentProblems = [...t.locked.map((a) => nameBtn(a.name, '<span class="pill seal">密码输错太多次，锁住了</span>')), ...t.noPw.map((a) => nameBtn(a.name, '还没设个人密码')), ...t.unbound.map((a) => nameBtn(a.name, '还没在手机上登记过'))].join('');
     const settleSum = t.toSettle.reduce((s, d) => s + C.calcDeal(d).net, 0);
+    const LBL = { confirm: '单没确认', cust: '单缺客户电话', fill: '套房源要补资料', owner: '套没留房东电话', stale: '套房源 30 天没跟进' };
+    const perNames = sortNames(Object.keys(t.per));
+    const lastNudge = (n) => (state.nudges || []).find((x) => x.agent_name === n);
+    const nudgeTxt = (n) => { const x = lastNudge(n); if (!x) return ''; const d = new Date(x.created_at), p = (v) => String(v).padStart(2, '0');
+      return `<span class="small muted">${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())} 催过，${x.seen_at ? '她已经看到了' : '她还没打开看'}</span>`; };
+    const nudgeRows = perNames.map((n) => `<div class="nudge-row"><div class="grow"><button class="linkish" data-a="${esc(n)}"><b>${esc(n)}</b></button>
+        <div class="small">${Object.entries(t.per[n]).filter(([, v]) => v).map(([k, v]) => `<b class="num">${v}</b> ${LBL[k]}`).join('，')}</div>${nudgeTxt(n)}</div>
+        <button data-nudge="${esc(n)}">催一下</button></div>`).join('');
     shell(`
       <div class="card stack" style="gap:6px"><h2 style="margin:0">待办</h2><div class="small muted">哪些事还没做完、卡在谁那里，一页看清。点名字或单子直接打开。</div></div>
+      ${sec('按人看 · 催办', perNames.length, '每个人还有几件事没做。点“催一下”，她下次打开业务员页会弹出提醒，写着她还有哪些没做。急的话再在群里说一声。', nudgeRows + (perNames.length > 1 ? '<button class="btn-block" id="nudge-all" style="margin-top:8px">全部催一下</button>' : ''), '大家手上都没有没做完的事。')}
       ${sec('等业务员确认', t.confirming.length, `${t.confirming.length} 单还在等确认。下面是每个人还有几单没点确认，可以在群里提醒一下。`, unconfRows, '所有发出去的单子都确认完了。')}
       ${sec('客户信息没填', t.noCust.length, '客户方业务员确认时会填。下面按客户方业务员列出来，同一单有几个人的话谁填都行。', custRows, '每一单的客户名字、电话都有了。')}
       ${sec('房源待补全', t.needInfo.length, '记账时自动建的房源，只有小区和坐落，等房源维护人补户型、面积。', needRows, '没有要补全的房源。')}
@@ -338,6 +357,9 @@
     app.querySelectorAll('[data-l]').forEach((b) => b.onclick = () => openListing(state.listings.find((l) => String(l.id) === b.dataset.l)));
     app.querySelectorAll('[data-a]').forEach((b) => b.onclick = () => openAgent(b.dataset.a));
     if ($('#go-settle')) $('#go-settle').onclick = () => { state.tab = 'settle'; render(); };
+    const doNudge = async (names, btn) => { btn.disabled = true; btn.textContent = '正在发…'; await run(() => S.nudge(names)); await loadAll(); renderTodo(); toast(names.length > 1 ? `已经催了 ${names.length} 个人` : `已经催了 ${names[0]}`); };
+    app.querySelectorAll('[data-nudge]').forEach((b) => b.onclick = () => doNudge([b.dataset.nudge], b));
+    if ($('#nudge-all')) $('#nudge-all').onclick = (e) => doNudge(perNames, e.currentTarget);
   }
 
   // ---------- 记账 ----------

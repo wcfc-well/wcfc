@@ -259,7 +259,7 @@ details.dd[open] .dd-hint::before{content:"收起 ▴"}
 
 .fb-list{display:flex;flex-direction:column;gap:8px}
 .fb{border-left:3px solid var(--accent);padding:4px 10px;background:var(--bg)}
-.ctabs{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.ctabs{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
 .ctabs button[aria-pressed="true"]{background:var(--accent);color:var(--surface);border-color:var(--accent);font-weight:600}
 
 .nlog summary{cursor:pointer;padding:4px 0}
@@ -340,3 +340,5 @@ a.tel{color:var(--accent);font-weight:700;text-decoration:underline;white-space:
 .tabbar .todo-n{font-size:11px;line-height:16px;min-width:16px;padding:0 4px;vertical-align:top}
 .todo-sec summary{cursor:pointer;list-style:none}
 .todo-sec summary::-webkit-details-marker{display:none}
+.nudge-row{display:flex;gap:10px;align-items:center;border-top:1px solid var(--line);padding:10px 0}
+.nudge-row .linkish{padding:0;min-height:0;border:0;background:none;font-size:17px;color:inherit}

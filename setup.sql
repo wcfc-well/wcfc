@@ -571,3 +571,49 @@ begin
 end $$;
 drop trigger if exists trg_deals_customer_by on deals;
 create trigger trg_deals_customer_by before insert or update on deals for each row execute function deals_customer_by();
+
+-- ---------- 2026-11-08：催办（店面点“催一下”，业务员下次打开页面弹出提醒：还有哪些事没做） ----------
+create table if not exists nudges (
+  id bigserial primary key,
+  agent_name text not null,
+  created_at timestamptz not null default now(),
+  seen_at timestamptz
+);
+alter table nudges enable row level security;
+drop policy if exists shop_all on nudges; create policy shop_all on nudges for all to authenticated using (true) with check (true);
+create or replace function aunt_nudge_seen(p_token text) returns void
+language plpgsql security definer set search_path = public as $$
+declare a agents;
+begin
+  select * into a from agents where device_token = p_token and active;
+  if not found then raise exception '请重新登记'; end if;
+  update nudges set seen_at = now() where agent_name = a.name and seen_at is null;
+end $$;
+revoke all on function aunt_nudge_seen(text) from public;
+grant execute on function aunt_nudge_seen(text) to anon, authenticated;
+
+-- 业务员看到的单子多带两样：还在等谁确认（waiting），以及店面有没有催过她（nudge）
+create or replace function aunt_statement(p_token text) returns json
+language plpgsql security definer set search_path = public as $$
+declare a agents; r json;
+begin
+  select * into a from agents where device_token = p_token and active;
+  if not found then return null; end if;
+  select json_build_object(
+    'name', a.name,
+    'nudge', (select row_to_json(n) from nudges n where n.agent_name = a.name and n.seen_at is null order by n.created_at desc limit 1),
+    'deals', coalesce((select json_agg(json_build_object(
+        'deal', row_to_json(d),
+        'confirmation', (select row_to_json(c) from confirmations c where c.deal_id = d.id and c.agent_name = a.name),
+        'waiting', (select coalesce(json_agg(n), '[]'::json) from unnest(deal_people(d)) n
+                     where not exists (select 1 from confirmations c where c.deal_id = d.id and c.agent_name = n and c.status = 'ok'))
+      ) order by d.deal_date desc, d.id desc)
+      from deals d left join settlements s on s.id = d.settlement_id
+      where d.status <> 'draft' and a.name = any(deal_people(d))
+        and (d.settlement_id is null or s.created_at > now() - interval '400 days')), '[]'::json),
+    'settlements', coalesce((select json_agg(row_to_json(s) order by s.created_at desc) from settlements s
+      where s.created_at > now() - interval '400 days'
+        and exists (select 1 from deals d where d.settlement_id = s.id and a.name = any(deal_people(d)))), '[]'::json)
+  ) into r;
+  return r;
+end $$;
