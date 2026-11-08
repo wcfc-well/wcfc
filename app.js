@@ -344,7 +344,7 @@
         </div>`).join('');
     shell(`
       <div class="card stack" style="gap:6px"><h2 style="margin:0">待办</h2><div class="small muted">哪些事还没做完、卡在谁那里，一页看清。点名字或单子直接打开。</div></div>
-      ${perNames.length ? `<button class="btn-primary btn-block" id="nudge-all" style="font-size:19px;min-height:54px">🔔 一起催办（${perNames.length} 人）</button>` : ''}
+      ${perNames.length ? `<div class="stack" style="gap:4px"><button class="btn-primary btn-block" id="nudge-all" style="font-size:19px;min-height:54px">🔔 一起催办（${perNames.length} 人）</button><div class="small muted">点了会同时复制一段催办消息，写着每个人还差什么。到微信群里长按“粘贴”发出去，大家手机锁屏都能看到。</div></div>` : ''}
       ${sec('按人看', perNames.length, '每个人还有几件事没做。点上面“一起催办”：开了锁屏提醒的（🔔）手机锁屏马上收到；没开的下次打开业务员页会弹出提醒。', nudgeRows, '大家手上都没有没做完的事。')}
       ${sec('等业务员确认', t.confirming.length, `${t.confirming.length} 单还在等确认。下面是每个人还有几单没点确认，可以在群里提醒一下。`, unconfRows, '所有发出去的单子都确认完了。')}
       ${sec('客户信息没填', t.noCust.length, '客户方业务员确认时会填。下面按客户方业务员列出来，同一单有几个人的话谁填都行。', custRows, '每一单的客户名字、电话都有了。')}
@@ -366,9 +366,11 @@
       let pushed = null;
       if (S.pushNudge) { try { pushed = await S.pushNudge(names.map((n) => ({ name: n, body: bodyOf(n) }))); } catch (e) { pushed = null; } }
       await loadAll(); renderTodo();
-      toast(`已经催了 ${names.length} 个人` + (pushed ? (pushed.sent ? `，其中 ${pushed.sent} 人手机锁屏收到通知` : '，没人开锁屏提醒，她们打开页面时会看到') : ''));
+      toast(`已经催了 ${names.length} 个人，催办消息也复制好了，去微信群里粘贴发出去` + (pushed && pushed.sent ? `（${pushed.sent} 人 iPhone 锁屏已收到）` : ''));
     };
-    if ($('#nudge-all')) $('#nudge-all').onclick = (e) => doNudge(perNames, e.currentTarget);
+    // 一起催办：同时复制一段催办消息，到微信群里粘贴（安卓手机锁屏靠微信消息提醒）
+    const groupMsg = () => '【店面提醒】\n' + perNames.map((n) => `@${n} 还有 ` + Object.entries(t.per[n]).filter(([, v]) => v).map(([k, v]) => v + ' ' + LBL[k]).join('，')).join('\n') + `\n请打开业务员页处理一下：${CONFIRM_URL()}`;
+    if ($('#nudge-all')) $('#nudge-all').onclick = (e) => { copy(groupMsg()); doNudge(perNames, e.currentTarget); };
   }
 
   // ---------- 记账 ----------
