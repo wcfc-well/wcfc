@@ -337,12 +337,11 @@
     // 客户信息只存一份：客户方有几位业务员时，谁先确认谁填，填好了别人能看到是谁填的
     const custTodo = (d) => {
       const filled = d.customer_name && (d.customer_phone || '').replace(/\D/g, '').length >= 7;
-      const others = d.client_agents.filter((n) => n !== name);
       const by = d.customer_by && d.customer_by !== name ? (d.customer_by === '店面' ? '店面' : d.customer_by) : '';
       const when = d.customer_at ? new Date(d.customer_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
       const head = filled
         ? `<b>✓ 客户信息${by ? '已由 ' + esc(by) + ' 填好' : '已经填好'}</b>${when ? `<span class="small muted">${esc(when)}</span>` : ''}<span class="small">看一下没问题，直接点“确认无误”就行。填错了可以在这里改。</span>`
-        : `<b>您是客户方业务员，请补全客户信息（必须填，店里留存）</b>${others.length ? `<span class="small">这一单客户方还有 ${esc(others.join('、'))}。客户信息只要填一次：谁先确认谁来填，填好了大家都看得到是谁填的。</span>` : ''}`;
+        : `<b>您是客户方业务员，请补全客户信息（必须填，店里留存）</b><span class="small">客户名字和电话不填，这一单确认不了。</span>`;
       return `<div class="todo-card stack" style="gap:8px">${head}
           <span class="small">客户（名字、电话）</span><div class="oline nodel"><input data-cn="${d.id}" data-orig="${esc(d.customer_name || '')}" value="${esc(d.customer_name || '')}" placeholder="客户名字" aria-label="客户名字"><input data-cp="${d.id}" data-orig="${esc(d.customer_phone || '')}" value="${esc(d.customer_phone || '')}" inputmode="tel" placeholder="手机号" aria-label="客户电话"><button type="button" class="ocall" data-call aria-label="拨打这个电话">📞</button></div></div>`;
     };
