@@ -187,20 +187,20 @@
     ov.innerHTML = `<div class="img-box"><div style="font-size:17px">${tip}</div>
       ${isImg ? `<img src="${imgUrl}" alt="${esc(title)}">` : ''}
       <div class="small muted" data-st aria-live="polite"></div>
-      ${WECHAT ? '' : `<div class="row" style="gap:8px"><a class="btn btn-primary grow" data-save href="#" role="button">保存到手机</a>${canShare ? '<button class="grow" data-share>发送给…</button>' : ''}</div>`}
-      <button class="btn-block" data-wx hidden>复制链接，发到微信</button>
+      ${WECHAT ? '' : `${canShare ? `<button class="btn-primary btn-block" data-share style="font-size:19px;min-height:52px">发到微信</button><div class="small muted">点了会弹出分享，选“微信”，再选要发的群或人。${isImg ? '发出去就是这张图片' : '发出去就是这个 PDF 文件'}，不用先保存。</div>` : ''}
+      <div class="row" style="gap:8px"><a class="btn ${canShare ? '' : 'btn-primary '}grow" data-save href="#" role="button">保存到手机</a></div>`}
       <div class="row" style="gap:8px"><button class="grow" data-copy hidden>复制下载链接</button><button class="grow" data-close>关闭</button></div></div>`;
     const st = (m) => { ov.querySelector('[data-st]').textContent = m; };
     ov.querySelector('[data-close]').onclick = () => ov.remove();
     document.body.appendChild(ov);
     if (WECHAT) return;
-    const sv = ov.querySelector('[data-save]'), cp = ov.querySelector('[data-copy]'), wx = ov.querySelector('[data-wx]');
-    let link = null, view = null;
+    const sv = ov.querySelector('[data-save]'), cp = ov.querySelector('[data-copy]');
+    let link = null;
     // 线上：先传到云端（大约 1~3 秒）；演示模式没有云端，用老办法
     if (S.uploadExport) {
       sv.classList.add('disabled'); sv.textContent = '正在准备…';
       S.uploadExport(blob, fname).then((u) => {
-        link = u.download; view = u.view; wx.hidden = false; sv.href = link; sv.setAttribute('download', fname); sv.classList.remove('disabled'); sv.textContent = '保存到手机'; cp.hidden = false;
+        link = u.download; sv.href = link; sv.setAttribute('download', fname); sv.classList.remove('disabled'); sv.textContent = '保存到手机'; cp.hidden = false;
       }).catch(() => { sv.classList.remove('disabled'); sv.textContent = '保存到手机'; st('网络不好，没准备好下载链接，先试试直接保存。'); });
     }
     sv.onclick = (e) => {
@@ -209,10 +209,9 @@
       e.preventDefault(); download(blob, fname); st('已保存到手机的“下载”文件夹。没反应的话请长按图片保存，或者换个浏览器。');
     };
     cp.onclick = () => link && copy(link);
-    // 发微信：复制一段话 + 链接，粘贴到微信聊天里。对方点开就能看（图片可以长按保存、转发），7 天内有效
-    wx.onclick = () => { if (!view) return; copy(`【文城房产】${title}（7 天内有效，点开查看）：${view}`); st('已复制。打开微信，在聊天框里长按“粘贴”发出去就行。'); };
     const sh = ov.querySelector('[data-share]');
-    if (sh) sh.onclick = async () => { try { await navigator.share({ files: [file], title }); } catch (e) { if (e.name !== 'AbortError') st('这个手机不支持直接发送，请点“保存到手机”。'); } };
+    // 只发文件、不带文字：带了文字的话，微信有时只收到文字、收不到图片
+    if (sh) sh.onclick = async () => { try { await navigator.share({ files: [file] }); } catch (e) { if (e.name !== 'AbortError') st('这个手机不能直接发，请点“保存到手机”，再到微信里发。'); } };
   }
   function busy(btn, fn) {
     return async () => { const old = btn.textContent; btn.textContent = '正在生成…'; btn.disabled = true;
@@ -262,6 +261,7 @@
         <button data-tab="deals" aria-current="${state.tab === 'deals'}">记账</button>
         <button data-tab="settle" aria-current="${state.tab === 'settle'}">结算</button>
         <button data-tab="agents" aria-current="${state.tab === 'agents'}">业务员</button>
+        <button data-tab="todo" aria-current="${state.tab === 'todo'}">待办${(() => { const n = todoCount(); return n ? ` <span class="todo-n">${n}</span>` : ''; })()}</button>
       </nav>`;
     app.querySelectorAll('.tabbar button').forEach((b) => b.onclick = () => { state.tab = b.dataset.tab; render(); });
   }
@@ -269,9 +269,76 @@
     if (state.tab === 'deals') return renderDeals();
     if (state.tab === 'settle') return renderSettle();
     if (state.tab === 'listings') return renderListings();
+    if (state.tab === 'todo') return renderTodo();
     return renderAgents();
   }
   async function reload() { await loadAll(); render(); }
+
+
+  // ---------- 待办（后台监视）：还有哪些事没做完、卡在谁那里 ----------
+  const DAY = 86400000;
+  const daysAgo = (t) => t ? Math.floor((Date.now() - new Date(t).getTime()) / DAY) : null;
+  const phoneOK = (p) => (p || '').replace(/\D/g, '').length >= 7;
+  function todoData() {
+    const active = state.agents.filter((a) => a.active);
+    const auto = new Set(state.agents.filter((a) => a.auto_confirm).map((a) => a.name));
+    const confirming = state.deals.filter((d) => d.status === 'confirming');
+    // 1. 谁还没确认
+    const unconf = {};
+    confirming.forEach((d) => { const p = progress(d); p.who.filter((n) => !(p.cm[n] && p.cm[n].status === 'ok') && !auto.has(n)).forEach((n) => (unconf[n] = unconf[n] || []).push(d)); });
+    // 2. 客户信息没填（补记的返点不用填）
+    const noCust = state.deals.filter((d) => d.status !== 'draft' && !d.parent_id && (d.client_agents || []).length && (!(d.customer_name || '').trim() || !phoneOK(d.customer_phone)));
+    const live = state.listings.filter((l) => l.status !== 'off');
+    // 3. 房源待补全
+    const needInfo = live.filter((l) => l.needs_info);
+    // 4. 在售 / 在租的房源，30 天没人跟进（没改过、没写反馈、没改备注）
+    const lastTouch = (l) => [l.updated_at, l.note_at, l.created_at, ...(l.feedback || []).map((x) => x.created_at)].filter(Boolean).sort().pop();
+    const stale = live.filter((l) => l.status === 'active' && daysAgo(lastTouch(l)) >= 30).map((l) => ({ l, days: daysAgo(lastTouch(l)) })).sort((x, y) => y.days - x.days);
+    // 5. 房东电话没留
+    const noOwner = live.filter((l) => l.status === 'active' && (!(l.owners || []).length || (l.owners || []).some((o) => !phoneOK(o.phone))));
+    // 6. 业务员这边的问题：没设密码、还没登记手机、输错锁住了
+    const people = active.filter((a) => !a.auto_confirm);
+    const noPw = people.filter((a) => !a.phone4), locked = people.filter((a) => (a.fail_count || 0) >= 5), unbound = people.filter((a) => a.phone4 && !a.device_token && (a.fail_count || 0) < 5);
+    // 7. 草稿没发出去；8. 已确认等结算
+    const drafts = state.deals.filter((d) => d.status === 'draft');
+    const toSettle = state.deals.filter(canSettle).sort((x, y) => x.deal_date.localeCompare(y.deal_date));
+    return { unconf, confirming, noCust, needInfo, stale, noOwner, noPw, locked, unbound, drafts, toSettle };
+  }
+  function todoCount() {
+    try { const t = todoData(); return t.confirming.length + t.noCust.length + t.needInfo.length + t.drafts.length + t.locked.length; } catch (e) { return 0; }
+  }
+  function renderTodo() {
+    const t = todoData();
+    const byPerson = (list, who) => { const m = {}; list.forEach((x) => who(x).forEach((n) => (m[n] = m[n] || []).push(x))); return sortNames(Object.keys(m)).map((n) => [n, m[n]]); };
+    const dealBtn = (d, extra) => `<button class="deal-line" data-d="${d.id}"><div class="row" style="gap:8px;flex-wrap:nowrap">${typeTag(d.type)}<b class="grow">${esc(d.title || '（没写房子）')}</b><span class="muted">›</span></div><div class="small muted"><span class="num">${d.deal_date}</span>${extra ? '　' + extra : ''}</div></button>`;
+    const lTitle = (l) => `${esc(l.community || '')} ${esc(l.unit || '')}`.trim() || '（没写坐落）';
+    const lBtn = (l, extra) => `<button class="deal-line" data-l="${l.id}"><div class="row" style="gap:8px;flex-wrap:nowrap"><b class="grow">${lTitle(l)}</b><span class="muted">›</span></div><div class="small muted">${esc(l.kind || '')}　维护人：${esc((l.agents || []).join('、') || '—')}${extra ? '　' + extra : ''}</div></button>`;
+    const nameBtn = (n, txt) => `<button class="deal-line" data-a="${esc(n)}"><div class="row" style="gap:8px;flex-wrap:nowrap"><b class="grow">${esc(n)}</b><span>${txt}</span><span class="muted">›</span></div></button>`;
+    const sec = (title, n, hint, body, ok) => `<details class="card todo-sec" ${n ? 'open' : ''}><summary class="row between"><b>${title}</b>${n ? `<span class="todo-n">${n}</span>` : '<span class="pill ok">都好了</span>'}</summary>
+      ${n ? `<div class="small muted" style="margin:6px 0">${hint}</div>${body}` : `<div class="small muted" style="margin-top:6px">${ok}</div>`}</details>`;
+    const unconfRows = sortNames(Object.keys(t.unconf)).map((n) => { const ds = t.unconf[n]; const old = Math.max(...ds.map((d) => daysAgo(d.updated_at || d.created_at) || 0)); return nameBtn(n, `<b class="num">${ds.length}</b> 单没确认${old >= 2 ? `<span class="small muted">（最久等了 ${old} 天）</span>` : ''}`); }).join('');
+    const custRows = byPerson(t.noCust, (d) => d.client_agents).map(([n, ds]) => `<div class="small" style="margin-top:8px"><b>${esc(n)}</b>（${ds.length} 单）</div>${ds.map((d) => dealBtn(d, d.customer_name ? '缺电话' : '名字、电话都没填')).join('')}`).join('');
+    const needRows = byPerson(t.needInfo, (l) => l.agents && l.agents.length ? l.agents : ['（没有维护人）']).map(([n, ls]) => `<div class="small" style="margin-top:8px"><b>${esc(n)}</b>（${ls.length} 套）</div>${ls.map((l) => lBtn(l, '户型面积还没填')).join('')}`).join('');
+    const staleRows = t.stale.slice(0, 30).map(({ l, days }) => lBtn(l, `${days} 天没动静`)).join('') + (t.stale.length > 30 ? `<div class="small muted">还有 ${t.stale.length - 30} 套没列出来</div>` : '');
+    const ownerRows = t.noOwner.slice(0, 30).map((l) => lBtn(l, (l.owners || []).length ? '有房东没留电话' : '没填房东')).join('') + (t.noOwner.length > 30 ? `<div class="small muted">还有 ${t.noOwner.length - 30} 套没列出来</div>` : '');
+    const agentProblems = [...t.locked.map((a) => nameBtn(a.name, '<span class="pill seal">密码输错太多次，锁住了</span>')), ...t.noPw.map((a) => nameBtn(a.name, '还没设个人密码')), ...t.unbound.map((a) => nameBtn(a.name, '还没在手机上登记过'))].join('');
+    const settleSum = t.toSettle.reduce((s, d) => s + C.calcDeal(d).net, 0);
+    shell(`
+      <div class="card stack" style="gap:6px"><h2 style="margin:0">待办</h2><div class="small muted">哪些事还没做完、卡在谁那里，一页看清。点名字或单子直接打开。</div></div>
+      ${sec('等业务员确认', t.confirming.length, `${t.confirming.length} 单还在等确认。下面是每个人还有几单没点确认，可以在群里提醒一下。`, unconfRows, '所有发出去的单子都确认完了。')}
+      ${sec('客户信息没填', t.noCust.length, '客户方业务员确认时会填。下面按客户方业务员列出来，同一单有几个人的话谁填都行。', custRows, '每一单的客户名字、电话都有了。')}
+      ${sec('房源待补全', t.needInfo.length, '记账时自动建的房源，只有小区和坐落，等房源维护人补户型、面积。', needRows, '没有要补全的房源。')}
+      ${sec('业务员还不能确认', t.locked.length + t.noPw.length + t.unbound.length, '没设密码的要在“业务员”里设一个；锁住的点进去解锁；没登记过的，把业务员链接发给她，让她点自己名字登记一次。', agentProblems, '每个业务员都能正常确认。')}
+      ${sec('草稿没发出去', t.drafts.length, '记了但还没发给业务员确认的单子。', t.drafts.map((d) => dealBtn(d, '草稿')).join(''), '没有草稿。')}
+      ${sec('在售在租，30 天没人跟进', t.stale.length, '30 天里没改过、没写备注、没写联系反馈。可以问一下维护人房子还在不在卖。', staleRows, '在售在租的房源最近都有人跟。')}
+      ${sec('房东电话没留', t.noOwner.length, '在售在租的房源里，没填房东或者房东没留电话的。', ownerRows, '房东电话都有。')}
+      ${sec('已确认、等结算', t.toSettle.length, `一共 ${t.toSettle.length} 单，总账 ${f(settleSum)}。最早一单是 ${t.toSettle[0] ? t.toSettle[0].deal_date : ''}。`, '<button class="btn-primary btn-block" id="go-settle" style="margin-top:6px">去结算</button>', '没有等结算的单子。')}
+    `);
+    app.querySelectorAll('[data-d]').forEach((b) => b.onclick = () => openDeal(state.deals.find((d) => String(d.id) === b.dataset.d)));
+    app.querySelectorAll('[data-l]').forEach((b) => b.onclick = () => openListing(state.listings.find((l) => String(l.id) === b.dataset.l)));
+    app.querySelectorAll('[data-a]').forEach((b) => b.onclick = () => openAgent(b.dataset.a));
+    if ($('#go-settle')) $('#go-settle').onclick = () => { state.tab = 'settle'; render(); };
+  }
 
   // ---------- 记账 ----------
   // 记账页检索：房子、房东、客户、业务员、备注、日期、类型都能搜，多个词用空格隔开
