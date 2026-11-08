@@ -364,7 +364,7 @@
       btn.disabled = true; btn.textContent = '正在发…';
       try { await run(() => S.nudge(names)); } catch (e) { btn.disabled = false; btn.textContent = '再试一次'; return; }
       let pushed = null;
-      if (S.pushNudge) { try { pushed = await S.pushNudge(names.map((n) => ({ name: n, body: bodyOf(n) }))); } catch (e) { pushed = null; } }
+      if (S.pushNudge && (window.APP_CONFIG || {}).pushPublicKey) { try { pushed = await S.pushNudge(names.map((n) => ({ name: n, body: bodyOf(n) }))); } catch (e) { pushed = null; } }
       await loadAll(); renderTodo();
       toast(`已经催了 ${names.length} 个人，催办消息也复制好了，去微信群里粘贴发出去` + (pushed && pushed.sent ? `（${pushed.sent} 人 iPhone 锁屏已收到）` : ''));
     };

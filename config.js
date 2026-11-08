@@ -3,6 +3,6 @@
 window.APP_CONFIG = {
   supabaseUrl: 'https://api.wenchengfangchan.xyz',
   supabaseAnonKey: 'sb_publishable_jfoRTlYSrPY06vGPmtmH9g_r9fkP5aI',
-  // 锁屏通知用的公钥（公开的，不是密码；配对的私钥只放在 Supabase 的 Secrets 里）
-  pushPublicKey: 'BCZ0sOC-MuAmUXNbZFUXOi1K0rOlnHlbPTFUUHlaJLHJjsgarBddGfTG72ucVjtRnb9GGPnzurdnbpEXh13NWIc',
+  // 锁屏通知（只有 iPhone 能收到，店里基本是安卓，先不用）：要用的话把公钥填回这里，见 supabase/functions/push
+  pushPublicKey: '',
 };
