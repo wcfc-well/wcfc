@@ -53,15 +53,45 @@ create table if not exists confirmations (
   primary key (deal_id, agent_name)
 );
 
+-- 2026-11-08：周增花 改名 邹增花（名字写错了）。所有地方一起改：业务员、单子、确认记录、房源、反馈。
+-- 改名时临时关掉 deals 上的触发器（已锁定的单子平时不让改），改完马上打开。
+do $$
+begin
+  if exists (select 1 from agents where name = '周增花') and not exists (select 1 from agents where name = '邹增花') then
+    alter table deals disable trigger user;
+    update agents set name = '邹增花' where name = '周增花';
+    update deals set listing_agents = array_replace(listing_agents, '周增花', '邹增花'),
+                     client_agents = array_replace(client_agents, '周增花', '邹增花'),
+                     expenses = replace(expenses::text, '"周增花"', '"邹增花"')::jsonb
+      where '周增花' = any(listing_agents) or '周增花' = any(client_agents) or expenses::text like '%"周增花"%';
+    alter table confirmations disable trigger user;
+    update confirmations set agent_name = '邹增花' where agent_name = '周增花';
+    alter table confirmations enable trigger user;
+    alter table deals enable trigger user;
+    if to_regclass('public.listings') is not null then
+      execute $q$update listings set agents = array_replace(agents, '周增花', '邹增花'),
+        note_log = replace(note_log::text, '"周增花"', '"邹增花"')::jsonb,
+        note_by = case when note_by = '周增花' then '邹增花' else note_by end,
+        created_by = case when created_by = '周增花' then '邹增花' else created_by end,
+        updated_by = case when updated_by = '周增花' then '邹增花' else updated_by end,
+        filled_by = case when filled_by = '周增花' then '邹增花' else filled_by end
+        where '周增花' = any(agents) or note_log::text like '%周增花%' or '周增花' in (note_by, created_by, updated_by, filled_by)$q$;
+    end if;
+    if to_regclass('public.listing_feedback') is not null then
+      execute $q$update listing_feedback set author = '邹增花' where author = '周增花'$q$;
+    end if;
+  end if;
+end $$;
+
 insert into agents (name, sort) values
-  ('石文倩',0),('安丽霞',1),('李秀英',2),('周增花',3),('王海燕',4),('赵春芹',5),('马美景',6),
+  ('石文倩',0),('安丽霞',1),('李秀英',2),('邹增花',3),('王海燕',4),('赵春芹',5),('马美景',6),
   ('张建华',7),('高梅',8),('吕绪红',9),('杨业沙',10),('朱文虎',11),('翁星宇',12)
 on conflict (name) do nothing;
 
 -- 这一单要确认的人（新房没有房源方）
 create or replace function deal_people(d deals) returns text[] language sql immutable as $$
   select coalesce(array_agg(distinct n), '{}') from unnest(
-    case when d.type = '新房' then d.client_agents else d.listing_agents || d.client_agents end) n;
+    case when d.type in ('新房', '合作') then d.client_agents else d.listing_agents || d.client_agents end) n;
 $$;
 
 -- ---------- 规则 ----------
@@ -79,9 +109,9 @@ begin
       return new;
     end if;
     if old.status = 'locked' then
-      -- 锁定后只允许结算（改 settlement_id）
-      if row(new.deal_date, new.type, new.title, new.owner_name, new.customer_name, new.incomes, new.expenses, new.listing_agents, new.client_agents, new.note, new.status, new.reopen_note, new.reopen_count)
-         is distinct from row(old.deal_date, old.type, old.title, old.owner_name, old.customer_name, old.incomes, old.expenses, old.listing_agents, old.client_agents, old.note, old.status, old.reopen_note, old.reopen_count) then
+      -- 锁定后只允许结算（改 settlement_id），以及改客户名字、电话（不影响分钱）
+      if row(new.deal_date, new.type, new.title, new.owner_name, new.incomes, new.expenses, new.listing_agents, new.client_agents, new.note, new.status, new.reopen_note, new.reopen_count)
+         is distinct from row(old.deal_date, old.type, old.title, old.owner_name, old.incomes, old.expenses, old.listing_agents, old.client_agents, old.note, old.status, old.reopen_note, old.reopen_count) then
         raise exception '这一单大家已经确认锁定，不能再改';
       end if;
       return new;
@@ -92,9 +122,9 @@ begin
     if new.status = 'locked' and old.status <> 'locked' and current_setting('app.locking', true) is distinct from 'on' then
       raise exception '要等相关业务员都确认后才会自动锁定';
     end if;
-    -- 内容改了或撤回成草稿：确认作废，需要重新确认
-    if row(old.deal_date, old.type, old.incomes, old.expenses, old.listing_agents, old.client_agents, old.owner_name, old.customer_name)
-         is distinct from row(new.deal_date, new.type, new.incomes, new.expenses, new.listing_agents, new.client_agents, new.owner_name, new.customer_name)
+    -- 内容改了或撤回成草稿：确认作废，需要重新确认（客户名字、电话不影响分钱，客户方业务员确认时会补，不作废）
+    if row(old.deal_date, old.type, old.incomes, old.expenses, old.listing_agents, old.client_agents, old.owner_name)
+         is distinct from row(new.deal_date, new.type, new.incomes, new.expenses, new.listing_agents, new.client_agents, new.owner_name)
        or new.status = 'draft' then
       delete from confirmations where deal_id = old.id;
     end if;
@@ -223,21 +253,211 @@ begin
   return r;
 end $$;
 
-create or replace function aunt_confirm(p_token text, p_deal bigint, p_status text, p_note text) returns void
+alter table deals add column if not exists customer_phone text not null default '';
+drop function if exists aunt_confirm(text, bigint, text, text);
+-- 客户方业务员确认时必须补全客户名字和电话（店面留存）
+create or replace function aunt_confirm(p_token text, p_deal bigint, p_status text, p_note text, p_cust_name text default null, p_cust_phone text default null) returns void
+language plpgsql security definer set search_path = public as $$
+declare a agents; d deals; cn text; cp text;
+begin
+  select * into a from agents where device_token = p_token and active;
+  if not found then raise exception '请重新登记'; end if;
+  select * into d from deals where id = p_deal for update;
+  if not found or d.status <> 'confirming' then raise exception '这一单现在不能确认'; end if;
+  if not (a.name = any(deal_people(d))) then raise exception '这一单没有您'; end if;
+  if p_status = 'ok' and a.name = any(d.client_agents) then
+    cn := coalesce(nullif(trim(p_cust_name), ''), d.customer_name);
+    cp := coalesce(nullif(trim(p_cust_phone), ''), d.customer_phone);
+    if coalesce(cn, '') = '' then raise exception '您是客户方业务员，请先填客户名字'; end if;
+    if length(regexp_replace(coalesce(cp, ''), '\D', '', 'g')) < 7 then raise exception '您是客户方业务员，请先填客户电话'; end if;
+    update deals set customer_name = cn, customer_phone = cp where id = p_deal;
+  end if;
+  insert into confirmations (deal_id, agent_name, status, note, at) values (p_deal, a.name, p_status, coalesce(p_note, ''), now())
+  on conflict (deal_id, agent_name) do update set status = excluded.status, note = excluded.note, at = now();
+end $$;
+
+revoke all on function aunt_names(), aunt_bind(text, text), aunt_statement(text), aunt_confirm(text, bigint, text, text, text, text) from public;
+grant execute on function aunt_names(), aunt_bind(text, text), aunt_statement(text), aunt_confirm(text, bigint, text, text, text, text) to anon, authenticated;
+
+
+-- ---------- 房源记录（店面全部能改；业务员能看、改备注、写联系反馈） ----------
+create table if not exists listings (
+  id bigserial primary key,
+  kind text not null default '出售' check (kind in ('出售', '出租')),
+  community text not null default '',      -- 小区
+  unit text not null default '',           -- 坐落
+  layout text not null default '',         -- 户型，例如 3室2厅
+  area numeric,                            -- 面积（平方米）
+  decoration text not null default '',     -- 装修
+  price numeric,                           -- 出售：总价（万元）；出租：月租（元）
+  owners jsonb not null default '[]',      -- 房东，可以有好几个：[{"name":"孙先生","phone":"138…"}]
+  agents text[] not null default '{}',     -- 负责的业务员，可以多个
+  status text not null default 'active' check (status in ('active', 'done', 'off')),
+  note text not null default '',
+  created_at date not null default current_date,
+  updated_at timestamptz not null default now()
+);
+alter table listings enable row level security;
+drop policy if exists shop_all on listings; create policy shop_all on listings for all to authenticated using (true) with check (true);
+alter table listings add column if not exists note_by text not null default '';
+alter table listings add column if not exists note_at timestamptz;
+-- 备注修改记录：[{by, at, note}]，每改一次加一条
+alter table listings add column if not exists note_log jsonb not null default '[]';
+
+-- 第二版：户型分类、几室几厅、电梯（房源维护人就是 agents：负责的业务员。业务员那边没有改它的入口，只有店面后台能改）
+alter table listings add column if not exists category text not null default '';
+alter table listings add column if not exists rooms int;
+alter table listings add column if not exists halls int;
+alter table listings add column if not exists elevator boolean not null default false;
+do $$ begin
+  alter table listings drop constraint if exists listings_category_check;
+  alter table listings add constraint listings_category_check check (category in ('', '小户', '小户带阁楼', '中户', '中户带阁楼', '大户', '大户带阁楼', '特大户', '特大户带阁楼', '商品房', '商铺'));
+end $$;
+
+-- 同一套房子（小区 + 坐落，去掉空格后相同）只能录一次
+create unique index if not exists listings_same_house on listings (
+  (regexp_replace(community, '\s', '', 'g')), (regexp_replace(unit, '\s', '', 'g')));
+
+-- 记账和房源连起来：一单记了账，对应房源自动变成已售 / 已租；这单删掉或换了房源，原来的房源变回在售 / 在租
+alter table deals add column if not exists listing_id bigint references listings(id) on delete set null;
+create or replace function deals_sync_listing() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op in ('UPDATE', 'DELETE') and old.listing_id is not null
+     and (tg_op = 'DELETE' or new.listing_id is distinct from old.listing_id)
+     and not exists (select 1 from deals where listing_id = old.listing_id and id <> old.id) then
+    update listings set status = 'active', updated_at = now() where id = old.listing_id and status = 'done';
+  end if;
+  if tg_op in ('INSERT', 'UPDATE') and new.listing_id is not null then
+    update listings set status = 'done', updated_at = now() where id = new.listing_id and status <> 'done';
+  end if;
+  return null;
+end $$;
+drop trigger if exists deals_sync_listing on deals;
+create trigger deals_sync_listing after insert or update of listing_id or delete on deals for each row execute function deals_sync_listing();
+
+-- 联系反馈：谁、什么时候、反馈了什么，可以一直往下加
+create table if not exists listing_feedback (
+  id bigserial primary key,
+  listing_id bigint not null references listings(id) on delete cascade,
+  author text not null default '',
+  content text not null default '',
+  created_at timestamptz not null default now()
+);
+alter table listing_feedback enable row level security;
+drop policy if exists shop_all on listing_feedback; create policy shop_all on listing_feedback for all to authenticated using (true) with check (true);
+
+-- 业务员（确认页）看房源：要有效的手机登记
+create or replace function aunt_listings(p_token text) returns json
+language plpgsql security definer set search_path = public as $$
+declare a agents;
+begin
+  select * into a from agents where device_token = p_token and active;
+  if not found then return null; end if;
+  return coalesce((select json_agg(to_jsonb(l) || jsonb_build_object(
+      'mine', a.name = any(l.agents),
+      'feedback', coalesce((select jsonb_agg(to_jsonb(f) order by f.created_at) from listing_feedback f where f.listing_id = l.id), '[]'::jsonb)
+    ) order by l.created_at desc, l.id desc) from listings l where l.status <> 'off'), '[]'::json);
+end $$;
+
+create or replace function aunt_listing_note(p_token text, p_id bigint, p_note text) returns void
+language plpgsql security definer set search_path = public as $$
+declare a agents;
+begin
+  select * into a from agents where device_token = p_token and active;
+  if not found then raise exception '请重新登记'; end if;
+  update listings set note = coalesce(p_note, ''), note_by = a.name, note_at = now(), updated_at = now(),
+    note_log = note_log || jsonb_build_object('by', a.name, 'at', now(), 'note', coalesce(p_note, ''))
+    where id = p_id and note is distinct from coalesce(p_note, '');
+end $$;
+
+create or replace function aunt_listing_feedback(p_token text, p_id bigint, p_content text) returns void
+language plpgsql security definer set search_path = public as $$
+declare a agents;
+begin
+  select * into a from agents where device_token = p_token and active;
+  if not found then raise exception '请重新登记'; end if;
+  if coalesce(trim(p_content), '') = '' then raise exception '反馈内容不能是空的'; end if;
+  insert into listing_feedback (listing_id, author, content) values (p_id, a.name, trim(p_content));
+end $$;
+
+revoke all on function aunt_listings(text), aunt_listing_note(text, bigint, text), aunt_listing_feedback(text, bigint, text) from public;
+grant execute on function aunt_listings(text), aunt_listing_note(text, bigint, text), aunt_listing_feedback(text, bigint, text) to anon, authenticated;
+
+-- ---------- 2026-11-08：记账时自动建的房源，交给房源维护人（房源方业务员）补全；业务员也能自己录入、修改房源 ----------
+-- needs_info = true：只有小区、坐落、房东、业务员，户型面积这些还没填。
+-- 维护人有两个以上的话，每个人后台都能看到“待补全”，谁先补完就算谁的（filled_by），其他人那里自动消失。
+alter table listings add column if not exists needs_info boolean not null default false;
+alter table listings add column if not exists filled_by text not null default '';
+alter table listings add column if not exists filled_at timestamptz;
+alter table listings add column if not exists created_by text not null default '';
+alter table listings add column if not exists updated_by text not null default '';
+drop function if exists aunt_listing_fill(text, bigint, jsonb);
+-- 业务员录入 / 修改房源。p_id 为空 = 新录入；不为空 = 修改房子信息。
+-- 房源维护人（agents）只有新录入时能选（不选就是自己），以后业务员这边改不了，只有店面后台能改。状态也只有店面和记账能改。
+create or replace function aunt_listing_save(p_token text, p_id bigint, p jsonb) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare a agents; l listings; ags text[]; new_id bigint;
+begin
+  select * into a from agents where device_token = p_token and active;
+  if not found then raise exception '请重新登记'; end if;
+  if coalesce(trim(p->>'community'), '') = '' then raise exception '请选小区'; end if;
+  if coalesce(trim(p->>'unit'), '') = '' then raise exception '请填坐落'; end if;
+  if coalesce(p->>'kind', '') not in ('出售', '出租') then raise exception '请选出售还是出租'; end if;
+  begin
+    if p_id is null then
+      select coalesce(array_agg(x), '{}') into ags from jsonb_array_elements_text(coalesce(p->'agents', '[]')) x where x in (select name from agents where active);
+      if cardinality(ags) = 0 then ags := array[a.name]; end if;
+      insert into listings (kind, community, unit, category, rooms, halls, area, price, elevator, decoration, owners, agents, status, note, note_by, note_at, note_log, created_by, updated_by)
+      values (p->>'kind', trim(p->>'community'), trim(p->>'unit'), coalesce(p->>'category', ''),
+        nullif(p->>'rooms', '')::int, nullif(p->>'halls', '')::int, nullif(p->>'area', '')::numeric, nullif(p->>'price', '')::numeric,
+        coalesce((p->>'elevator')::boolean, false), coalesce(p->>'decoration', ''),
+        case when jsonb_typeof(p->'owners') = 'array' then p->'owners' else '[]' end, ags, 'active',
+        coalesce(p->>'note', ''), case when coalesce(p->>'note', '') <> '' then a.name else '' end, case when coalesce(p->>'note', '') <> '' then now() end,
+        case when coalesce(p->>'note', '') <> '' then jsonb_build_array(jsonb_build_object('by', a.name, 'at', now(), 'note', p->>'note')) else '[]' end,
+        a.name, a.name)
+      returning id into new_id;
+      return new_id;
+    end if;
+    select * into l from listings where id = p_id for update;
+    if not found then raise exception '找不到这套房源'; end if;
+    update listings set kind = p->>'kind', community = trim(p->>'community'), unit = trim(p->>'unit'),
+      category = coalesce(p->>'category', ''), rooms = nullif(p->>'rooms', '')::int, halls = nullif(p->>'halls', '')::int,
+      area = nullif(p->>'area', '')::numeric, price = nullif(p->>'price', '')::numeric,
+      elevator = coalesce((p->>'elevator')::boolean, false), decoration = coalesce(p->>'decoration', ''),
+      owners = case when jsonb_typeof(p->'owners') = 'array' and a.name = any(l.agents) then p->'owners' else owners end,  -- 房东信息只有房源维护人（和店面）能改
+      needs_info = l.needs_info and coalesce(p->>'category', '') = '' and nullif(p->>'area', '') is null,
+      filled_by = case when l.needs_info and (coalesce(p->>'category', '') <> '' or nullif(p->>'area', '') is not null) then a.name else filled_by end,
+      filled_at = case when l.needs_info and (coalesce(p->>'category', '') <> '' or nullif(p->>'area', '') is not null) then now() else filled_at end,
+      updated_by = a.name, updated_at = now()
+    where id = p_id;
+    return p_id;
+  exception when unique_violation then
+    raise exception '系统里已经有这套房子了，不能重复录入';
+  end;
+end $$;
+revoke all on function aunt_listing_save(text, bigint, jsonb) from public;
+grant execute on function aunt_listing_save(text, bigint, jsonb) to anon, authenticated;
+
+-- ---------- 2026-11-08：客户方业务员随时可以改客户名字、电话（店面在后台直接改） ----------
+create or replace function aunt_set_customer(p_token text, p_deal bigint, p_name text, p_phone text) returns void
 language plpgsql security definer set search_path = public as $$
 declare a agents; d deals;
 begin
   select * into a from agents where device_token = p_token and active;
   if not found then raise exception '请重新登记'; end if;
-  select * into d from deals where id = p_deal;
-  if not found or d.status <> 'confirming' then raise exception '这一单现在不能确认'; end if;
-  if not (a.name = any(deal_people(d))) then raise exception '这一单没有您'; end if;
-  insert into confirmations (deal_id, agent_name, status, note, at) values (p_deal, a.name, p_status, coalesce(p_note, ''), now())
-  on conflict (deal_id, agent_name) do update set status = excluded.status, note = excluded.note, at = now();
+  select * into d from deals where id = p_deal for update;
+  if not found or not (a.name = any(d.client_agents)) then raise exception '只有这一单的客户方业务员能改客户信息'; end if;
+  if coalesce(trim(p_name), '') = '' then raise exception '请填客户名字'; end if;
+  if length(regexp_replace(coalesce(p_phone, ''), '\D', '', 'g')) < 7 then raise exception '请填正确的客户电话'; end if;
+  update deals set customer_name = trim(p_name), customer_phone = trim(p_phone) where id = p_deal;
 end $$;
+revoke all on function aunt_set_customer(text, bigint, text, text) from public;
+grant execute on function aunt_set_customer(text, bigint, text, text) to anon, authenticated;
 
-revoke all on function aunt_names(), aunt_bind(text, text), aunt_statement(text), aunt_confirm(text, bigint, text, text) from public;
-grant execute on function aunt_names(), aunt_bind(text, text), aunt_statement(text), aunt_confirm(text, bigint, text, text) to anon, authenticated;
+-- ---------- 2026-11-08：新加“合作”类型（和别的中介合作，总佣金对半分），记下合作的中介名字 ----------
+alter table deals drop constraint if exists deals_type_check;
+alter table deals add constraint deals_type_check check (type in ('二手买卖', '租房', '新房', '合作'));
+alter table deals add column if not exists partner text not null default '';
 
 -- ---------- 2026-11-08：自动确认（不会用手机的人，例如曹会计） ----------
 insert into agents (name, sort, auto_confirm) values ('曹会计', 13, true) on conflict (name) do update set auto_confirm = true;

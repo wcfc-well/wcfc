@@ -3,7 +3,9 @@
 //   每一单：净额 = 收入合计 − 支出合计
 //   店面维护成本 = （佣金 − 支出）× 10%，银行返点等其他收入不扣（新房没有这一项）
 //   剩余 = 净额 − 店面维护成本
-//   二手/租房：房源方 20%，客户方 80%；新房：没有房源方，100% 客户方
+//   佣金部分的纯利润：二手/租房 房源方 20%，客户方 80%；新房：没有房源方，100% 客户方
+//   返点不扣 10%，也不按 20/80 分，直接归一方：银行返点、装修返点 → 客户方；垫资返点 → 房源方；
+//   其他收入看记账时选的（side: 'listing' 房源方 / 'client' 客户方，默认客户方）。新房只有客户方
 //   每一块：店面拿一半，业务员一半由这一块的业务员平分
 //   零头：店面那部分向下取整到分，多出来的分归业务员（按名单顺序逐个多给 1 分）
 //   支出里标了“某业务员垫付”的，照样从总账里扣，结算时再把这笔钱加给垫付的人
@@ -16,19 +18,26 @@
     '二手买卖': ['客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
     '租房': ['客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
     '新房': ['客户介绍费', '客户维护费', '客户返点', '税费', '其他支出'],
+    '合作': ['客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
   };
-  const MAINT_RATE = { '二手买卖': 10, '租房': 10, '新房': 0 };
+  const MAINT_RATE = { '二手买卖': 10, '租房': 10, '新房': 0, '合作': 0 };
   // 只有佣金扣店面维护成本；银行返点、装修返点、垫资返点、其他收入都不扣
-  const COMMISSION_TYPES = ['卖房房东佣金', '卖房客户佣金', '租房佣金', '开发商佣金'];
-  const DEAL_TYPES = ['二手买卖', '租房', '新房'];
+  const COMMISSION_TYPES = ['卖房房东佣金', '卖房客户佣金', '租房佣金', '开发商佣金', '合作总佣金'];
+  const DEAL_TYPES = ['二手买卖', '租房', '新房', '合作'];
+  // 合作：和别的中介合作，总佣金对半分。我们这一半不分房源方客户方，店面一半、这一单的业务员平分一半（不扣 10%）
+  const oneSide = (t) => t === '新房' || t === '合作';
   // 每种房屋类型对应的佣金；返点和其他收入所有类型都可能有
   const COMMON_INCOME = ['银行返点', '装修返点', '垫资返点', '其他收入'];
   const INCOME_BY_TYPE = {
     '二手买卖': ['卖房房东佣金', '卖房客户佣金', ...COMMON_INCOME],
     '租房': ['租房佣金', ...COMMON_INCOME],
     '新房': ['开发商佣金', ...COMMON_INCOME],
+    '合作': ['合作总佣金', ...COMMON_INCOME],   // 返点、其他收入不给合作中介，店面和这一单业务员分
   };
   const STORE = '店面';
+  // 返点归哪一方
+  const RETURN_SIDE = { '银行返点': 'client', '装修返点': 'client', '垫资返点': 'listing' };
+  const sideOf = (it, isNew) => isNew ? 'client' : RETURN_SIDE[it.type] || (it.side === 'listing' ? 'listing' : 'client');
 
   const toFen = (yuan) => Math.round(Number(yuan || 0) * 100);
   const fmt = (fen) => {
@@ -56,16 +65,29 @@
   function calcDeal(deal) {
     const income = sum(deal.incomes);
     const expense = sum(deal.expenses);
-    const net = income - expense;
+    const isCoop = deal.type === '合作';
+    const coopTotal = isCoop ? sum((deal.incomes || []).filter((i) => i.type === '合作总佣金')) : 0;
+    const partnerCut = Math.floor(coopTotal / 2);             // 合作中介拿走的一半
+    const net = income - partnerCut - expense;
     const rate = MAINT_RATE[deal.type] == null ? 10 : MAINT_RATE[deal.type];
     const commission = sum((deal.incomes || []).filter((i) => COMMISSION_TYPES.includes(i.type)));
     const otherIncome = income - commission;
-    const maintBase = Math.max(0, commission - expense);     // 佣金减去支出后的部分才扣 10%
+    const maintBase = Math.max(0, commission - expense);     // 新房、合作的比例是 0，这里算了也不扣     // 佣金减去支出后的部分才扣 10%
     const maint = Math.floor(maintBase * rate / 100);
     const rest = net - maint;
-    const isNew = deal.type === '新房';
-    const listingBlock = isNew ? 0 : Math.floor(rest * 20 / 100);
-    const clientBlock = rest - listingBlock;
+    const isNew = oneSide(deal.type);
+    const profit = commission - partnerCut - expense - maint;               // 佣金部分的纯利润，按 20/80 分
+    const listingPct = isNew ? 0 : 20;
+    const listingProfit = Math.floor(profit * listingPct / 100);
+    const clientProfit = profit - listingProfit;
+    const returns = { listing: [], client: [] };               // 返点直接归一方：[{type, fen}]
+    (deal.incomes || []).filter((i) => !COMMISSION_TYPES.includes(i.type)).forEach((i) => {
+      const fen = toFen(i.amount); if (fen) returns[sideOf(i, isNew)].push({ type: i.type, fen, bank: i.bank || '' });
+    });
+    const listingReturn = returns.listing.reduce((a, x) => a + x.fen, 0);
+    const clientReturn = returns.client.reduce((a, x) => a + x.fen, 0);
+    const listingBlock = listingProfit + listingReturn;
+    const clientBlock = clientProfit + clientReturn;
     const L = splitBlock(listingBlock, isNew ? [] : deal.listing_agents);
     const C = splitBlock(clientBlock, deal.client_agents);
     const people = {};
@@ -85,7 +107,7 @@
     if (net < 0) warnings.push('这一单支出大于收入');
     const inDeal = [...(isNew ? [] : deal.listing_agents || []), ...(deal.client_agents || [])];
     Object.keys(reimb).forEach((n) => { if (!inDeal.includes(n)) warnings.push(`${n}垫付了钱，但不是这一单的业务员，结算单上不会显示，请把垫付人改成这一单的业务员`); });
-    return { income, expense, net, commission, otherIncome, maintBase, maint, rate, rest, listingBlock, clientBlock, listing: L, client: C, store, people, share, reimb, reimbTotal, warnings };
+    return { income, expense, partnerCut, isCoop, net, commission, otherIncome, maintBase, maint, rate, rest, profit, listingPct, listingProfit, clientProfit, returns, listingReturn, clientReturn, listingBlock, clientBlock, listing: L, client: C, store, people, share, reimb, reimbTotal, warnings };
   }
 
   // 汇总一期
@@ -101,6 +123,18 @@
     return { rows, totals };
   }
 
-  const api = { COMMISSION_TYPES, INCOME_TYPES, INCOME_BY_TYPE, EXPENSE_TYPES, EXPENSE_BY_TYPE, MAINT_RATE, DEAL_TYPES, STORE, toFen, fmt, calcDeal, calcPeriod };
+  // 模糊搜索：不用打全。去掉空格、横杠和“幢 栋 号 单元 室”这些字再比；
+  // 汉字按顺序出现就算（“幸福3-502”能找到“幸福小区 3-502”），数字要连着（“502”不会匹配到 5、0、2 分散的号码）
+  const norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[\s\-—–_#/\\·.,，。、()（）:：]|号楼|单元|[幢栋号室]/g, '');
+  function fuzzyOne(text, word) {
+    const t = norm(text), runs = norm(word).match(/\d+|\D/g);
+    if (!runs) return true;
+    let pos = 0;
+    for (const r of runs) { const i = t.indexOf(r, pos); if (i < 0) return false; pos = i + r.length; }
+    return true;
+  }
+  // fields：要搜的几段文字；query：用空格隔开的几个词，每个词都要在某一段里找到
+  const fuzzy = (fields, query) => String(query || '').trim().split(/\s+/).filter(Boolean).every((w) => fields.some((f) => fuzzyOne(f, w)));
+  const api = { fuzzy, oneSide, RETURN_SIDE, sideOf, COMMISSION_TYPES, INCOME_TYPES, INCOME_BY_TYPE, EXPENSE_TYPES, EXPENSE_BY_TYPE, MAINT_RATE, DEAL_TYPES, STORE, toFen, fmt, calcDeal, calcPeriod };
   if (typeof module !== 'undefined') module.exports = api; else root.Calc = api;
 })(this);

@@ -1,11 +1,11 @@
 {
-  "name": "文城房产记账",
-  "short_name": "文城记账",
+  "name": "文城房产",
+  "short_name": "文城房产",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f3f5f4",
-  "theme_color": "#17675a",
+  "theme_color": "#0a3229",
   "icons": [
     {
       "src": "icon-192.png",

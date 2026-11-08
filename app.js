@@ -3,12 +3,21 @@
   const S = window.Store, C = window.Calc, U = window.StoreUtil;
   const $ = (sel, el = document) => el.querySelector(sel);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // 每个电话旁边的 📞：点了直接拨打（号码取旁边输入框里的，或按钮自带的）
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-call]'); if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    const i = b.parentNode.querySelector('[data-op],[data-cp]');
+    const n = String(b.dataset.call || (i ? i.value : '')).replace(/[^\d+]/g, '');
+    if (n.length < 3) { if (i) { i.focus(); i.placeholder = '还没有电话'; } return; }
+    location.href = 'tel:' + n;
+  }, true);
   const f = C.fmt;
   const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const monthLabel = (m) => `${m.slice(0, 4)}年${Number(m.slice(5, 7))}月`;
   const CONFIRM_URL = () => new URL('confirm.html', location.href).href;
 
-  const state = { tab: 'deals', month: '', agents: [], deals: [], settlements: [], confs: [], selected: new Set(), openMonths: null };
+  const state = { tab: 'deals', month: '', dq: '', dstat: '', agents: [], deals: [], settlements: [], confs: [], listings: [], lf: { q: '' }, selected: new Set(), openMonths: null };
   const app = $('#app');
   // 打印 / 存 PDF 时把收起的明细全部展开
   window.addEventListener('beforeprint', () => document.querySelectorAll('#statement details').forEach((x) => { x.open = true; }));
@@ -34,7 +43,7 @@
   }
 
   async function loadAll() {
-    [state.agents, state.deals, state.settlements, state.confs] = await Promise.all([S.listAgents(), S.listDeals(), S.listSettlements(), S.listConfirmations()]);
+    [state.agents, state.deals, state.settlements, state.confs, state.listings] = await Promise.all([S.listAgents(), S.listDeals(), S.listSettlements(), S.listConfirmations(), S.listListings().catch(() => [])]);
     const ids = new Set(state.deals.filter(canSettle).map((d) => d.id));
     state.selected.forEach((id) => { if (!ids.has(id)) state.selected.delete(id); });
   }
@@ -56,7 +65,7 @@
   }
   const rowClass = () => '';
   // 房屋类型：醒目的实心标签，放在最前面
-  const typeTag = (t, big) => `<span class="tc tt-${{ '二手买卖': 'a', '租房': 'b', '新房': 'c' }[t] || 'a'}${big ? ' tc-big' : ''}">${{ '二手买卖': '二手', '租房': '租房', '新房': '新房' }[t] || esc(t)}</span>`;
+  const typeTag = (t, big) => `<span class="tc tt-${{ '二手买卖': 'a', '租房': 'b', '新房': 'c', '合作': 'd' }[t] || 'a'}${big ? ' tc-big' : ''}">${{ '二手买卖': '二手', '租房': '租房', '新房': '新房', '合作': '合作' }[t] || esc(t)}</span>`;
   // 状态：像快递进度一样的三步进度条（记账 → 业务员确认 → 结算），上面一句话写清楚现在到哪一步
   function steps(d) {
     const p = progress(d);
@@ -76,8 +85,8 @@
         ${node(settled ? 'done' : confirmed ? 'cur' : '', 2, '结算')}
       </div></div>`;
   }
-  const partyText = (d) => [d.type !== '新房' && d.owner_name ? '房东：' + d.owner_name : '', d.customer_name ? '客户：' + d.customer_name : ''].filter(Boolean).join('　');
-  const whoText = (d) => [d.type !== '新房' && d.listing_agents.length ? '房源方：' + d.listing_agents.join('、') : '', d.client_agents.length ? '客户方：' + d.client_agents.join('、') : ''].filter(Boolean).join('　') || '还没选业务员';
+  const partyText = (d) => [d.type === '合作' ? '合作中介：' + (d.partner || '—') : '', d.type !== '新房' && d.owner_name ? '房东：' + d.owner_name : '', d.customer_name ? '客户：' + d.customer_name : ''].filter(Boolean).join('　');
+  const whoText = (d) => d.type === '合作' ? (d.client_agents.join('、') || '—') : [d.type !== '新房' && d.listing_agents.length ? '房源方：' + d.listing_agents.join('、') : '', d.client_agents.length ? '客户方：' + d.client_agents.join('、') : ''].filter(Boolean).join('　') || '还没选业务员';
 
   // ---------- 分账明细（编辑页和单张结算单共用） ----------
   const itemName = (i) => i.type + (i.bank ? `（${i.bank}）` : '') + (i.person ? `（${i.person}）` : '') + (i.memo ? `（${i.memo}）` : '') + (i.paid_by ? `（${i.paid_by}垫付）` : '');
@@ -91,24 +100,29 @@
   function breakdownHTML(d, forStatement) {
     const r = C.calcDeal(d);
     const lines = (items, minus) => items.map((i) => `<span class="sub">${minus ? '减：' : ''}${esc(itemName(i))}</span><span class="num sub">${minus ? '-' : ''}${f(C.toFen(i.amount))}</span>`).join('');
-    const block = (title, blk, side, agents) => {
+    const retName = (x) => x.type + (x.bank ? `（${x.bank}）` : '');
+    const block = (title, blk, side, agents, profitPart, pct, rets, plabel) => {
       if (!blk) return '';
+      const parts = (rets.length ? `<span class="sub">${plabel || '佣金纯利润 ' + pct + '%'}</span><span class="num sub">${f(profitPart)}</span>` + rets.map((x) => `<span class="sub">加：${esc(retName(x))}（不扣 10%）</span><span class="num sub">${f(x.fen)}</span>`).join('') : '');
       const ppl = agents.length ? agents.map((n) => `<span>${esc(n)}</span><span class="num">${f(side.agents[n] || 0)}</span>`).join('') : '<span class="muted">还没选业务员</span><span></span>';
       return `<div class="bd-group"><span class="bd-title" style="grid-column:auto">${title}</span><b class="num" style="color:var(--accent)">${f(blk)}</b>
-        ${forStatement ? '' : `<span>店面一半</span><span class="num">${f(side.store)}</span>`}
+        ${parts}${forStatement ? '' : `<span>店面一半</span><span class="num">${f(side.store)}</span>`}
         <span class="sub" style="grid-column:1/-1">业务员一半 ${f(blk - side.store)}，${agents.length > 1 ? agents.length + ' 人平分' : '归这位业务员'}：</span>${ppl}</div>`;
     };
     return `<div class="bd">
       <div class="bd-group"><span class="bd-title">一、总账</span>
         ${lines(d.incomes)}<span>收入合计</span><span class="num">${f(r.income)}</span>
         ${lines(d.expenses, true)}<span>支出合计</span><span class="num">-${f(r.expense)}</span>
-        <span class="bd-key">总账（收入 − 支出）</span><span class="num bd-key">${f(r.net)}</span></div>
+        ${r.isCoop ? `<span>减：合作中介拿一半${d.partner ? '（' + esc(d.partner) + '）' : ''}</span><span class="num">-${f(r.partnerCut)}</span>` : ''}
+        <span class="bd-key">总账（${r.isCoop ? '我们这一半 − 支出' : '收入 − 支出'}）</span><span class="num bd-key">${f(r.net)}</span></div>
       <div class="bd-group"><span class="bd-title">二、纯利润</span>
         <span>总账</span><span class="num">${f(r.net)}</span>
-        ${r.rate ? `<span>减：店面维护成本 ${r.rate}%</span><span class="num">-${f(r.maint)}</span>${r.otherIncome || r.expense ? `<span class="sub" style="grid-column:1/-1">只扣佣金部分：（佣金 ${f(r.commission)}${r.expense ? ' − 支出 ' + f(r.expense) : ''}）× ${r.rate}%${r.otherIncome ? '，返点等其他收入 ' + f(r.otherIncome) + ' 不扣' : ''}</span>` : ''}` : '<span class="sub" style="grid-column:1/-1">新房不扣店面维护成本，总账就是纯利润</span>'}
-        <span class="bd-key">纯利润</span><span class="num bd-key">${f(r.rest)}</span></div>
-      ${d.type === '新房' ? block('三、客户方 100%（新房，没有房源方）', r.clientBlock, r.client, d.client_agents)
-        : block('三、房源方 20%', r.listingBlock, r.listing, d.listing_agents) + block('四、客户方 80%', r.clientBlock, r.client, d.client_agents)}
+        ${r.rate ? `<span>减：店面维护成本 ${r.rate}%</span><span class="num">-${f(r.maint)}</span>${r.otherIncome || r.expense ? `<span class="sub" style="grid-column:1/-1">只扣佣金部分：（佣金 ${f(r.commission)}${r.expense ? ' − 支出 ' + f(r.expense) : ''}）× ${r.rate}%${r.otherIncome ? '，返点等其他收入 ' + f(r.otherIncome) + ' 不扣' : ''}</span>` : ''}` : `<span class="sub" style="grid-column:1/-1">${r.isCoop ? '合作单不扣店面维护成本，总账就是纯利润' : '新房不扣店面维护成本，总账就是纯利润'}</span>`}
+        <span class="bd-key">纯利润</span><span class="num bd-key">${f(r.rest)}</span>
+        ${r.otherIncome && r.isCoop ? '<span class="sub" style="grid-column:1/-1">合作单的返点和其他收入不给合作中介、不扣 10%，和我们那一半佣金放在一起，店面一半、业务员一半</span>' : ''}${r.otherIncome && !r.isCoop ? `<span class="sub" style="grid-column:1/-1">佣金部分 ${f(r.profit)} 按${d.type === '新房' ? '客户方 100%' : '房源方 20%、客户方 80%'}分；返点不按比例，直接归一方：${d.type === '新房' ? '新房全部归客户方' : '银行、装修返点归客户方，垫资返点归房源方，其他收入看选的哪一方'}</span>` : ''}</div>
+      ${r.isCoop ? block('三、店面和业务员分（合作单不分房源方、客户方）', r.clientBlock, r.client, d.client_agents, r.clientProfit, 100, r.returns.client, '佣金我们这一半 − 支出')
+        : d.type === '新房' ? block('三、客户方（新房，没有房源方）', r.clientBlock, r.client, d.client_agents, r.clientProfit, 100, r.returns.client)
+        : block('三、房源方', r.listingBlock, r.listing, d.listing_agents, r.listingProfit, 20, r.returns.listing) + block('四、客户方', r.clientBlock, r.client, d.client_agents, r.clientProfit, 80, r.returns.client)}
       ${reimbHTML(r)}
       ${forStatement ? '' : `<div class="bd-group bd-store"><span class="bd-title">这一单合计</span>
         <span class="bd-key" style="border:0;padding:0">店面</span><span class="num bd-key" style="border:0;padding:0">${f(r.store)}</span>
@@ -244,6 +258,7 @@
         <div id="view" class="stack">${inner}</div>
       </div>${extra}
       <nav class="tabbar" aria-label="主菜单">
+        <button data-tab="listings" aria-current="${state.tab === 'listings'}">房源</button>
         <button data-tab="deals" aria-current="${state.tab === 'deals'}">记账</button>
         <button data-tab="settle" aria-current="${state.tab === 'settle'}">结算</button>
         <button data-tab="agents" aria-current="${state.tab === 'agents'}">业务员</button>
@@ -253,14 +268,41 @@
   function render() {
     if (state.tab === 'deals') return renderDeals();
     if (state.tab === 'settle') return renderSettle();
+    if (state.tab === 'listings') return renderListings();
     return renderAgents();
   }
   async function reload() { await loadAll(); render(); }
 
   // ---------- 记账 ----------
+  // 记账页检索：房子、房东、客户、业务员、备注、日期、类型都能搜，多个词用空格隔开
+  const dealStat = (d) => d.settlement_id ? 'settled' : d.status === 'draft' ? 'confirming' : d.status;
+  const dealFields = (d) => [d.title, d.owner_name, d.customer_name, d.partner, d.note, d.deal_date, d.type, ...(d.listing_agents || []), ...(d.client_agents || []),
+    ...(d.incomes || []).map((i) => i.type + (i.bank || '')), ...(d.expenses || []).map((i) => [i.person, i.memo, i.paid_by].filter(Boolean).join(' '))];
   function renderDeals() {
     const months = [...new Set(state.deals.map((d) => d.deal_date.slice(0, 7)))].sort().reverse();
-    const list = state.deals.filter((d) => !state.month || d.deal_date.startsWith(state.month));
+    shell(`
+      <div class="row">
+        <select id="month" class="grow" aria-label="月份"><option value="">全部月份</option>${months.map((m) => `<option value="${m}" ${m === state.month ? 'selected' : ''}>${monthLabel(m)}</option>`).join('')}</select>
+        <button class="btn-primary" id="add">＋ 记一单</button>
+      </div>
+      <div class="card stack" style="gap:8px">
+        <input id="dq" type="search" value="${esc(state.dq)}" placeholder="搜房子、房东、客户、业务员…" aria-label="搜索记账" autocomplete="off">
+        <div class="seg" role="group" aria-label="状态" style="grid-template-columns:repeat(4,1fr)">${[['', '全部'], ['confirming', '等确认'], ['locked', '已确认'], ['settled', '已结算']].map(([v, t]) => `<button type="button" data-dstat="${v}" aria-pressed="${state.dstat === v}">${t}</button>`).join('')}</div>
+      </div>
+      <div id="deal-results"></div>`);
+    $('#month').onchange = (e) => { state.month = e.target.value; drawDeals(); };
+    $('#add').onclick = () => openDeal(null);
+    const dq = $('#dq');
+    dq.addEventListener('input', (e) => { if (e.isComposing) return; state.dq = dq.value; drawDeals(); });
+    dq.addEventListener('compositionend', () => { state.dq = dq.value; drawDeals(); });
+    app.querySelectorAll('[data-dstat]').forEach((b) => b.onclick = () => { state.dstat = b.dataset.dstat; app.querySelectorAll('[data-dstat]').forEach((x) => x.setAttribute('aria-pressed', x === b)); drawDeals(); });
+    drawDeals();
+  }
+  function drawDeals() {
+    const words = state.dq.trim();
+    const list = state.deals.filter((d) => (!state.month || d.deal_date.startsWith(state.month))
+      && (!state.dstat || dealStat(d) === state.dstat)
+      && C.fuzzy(dealFields(d), state.dq));
     let inc = 0, net = 0; list.forEach((d) => { const r = C.calcDeal(d); inc += r.income; net += r.net; });
     const cards = list.map((d) => {
       const r = C.calcDeal(d);
@@ -274,20 +316,16 @@
         ${steps(d)}
       </div></button>`;
     }).join('');
-    shell(`
-      <div class="row">
-        <select id="month" class="grow" aria-label="月份"><option value="">全部月份</option>${months.map((m) => `<option value="${m}" ${m === state.month ? 'selected' : ''}>${monthLabel(m)}</option>`).join('')}</select>
-        <button class="btn-primary" id="add">＋ 记一单</button>
-      </div>
+    const filtering = words.length || state.dstat;
+    const box = $('#deal-results'); box.className = 'stack';
+    box.innerHTML = `
       <div class="tiles">
         <div class="tile"><div class="small muted">单数</div><div class="v num">${list.length}</div></div>
         <div class="tile"><div class="small muted">收入合计</div><div class="v num">${f(inc)}</div></div>
         <div class="tile"><div class="small muted">总账合计</div><div class="v num">${f(net)}</div></div>
       </div>
-      ${cards || '<div class="card muted">还没有记账。点“记一单”开始。</div>'}`);
-    $('#month').onchange = (e) => { state.month = e.target.value; renderDeals(); };
-    $('#add').onclick = () => openDeal(null);
-    app.querySelectorAll('button[data-id]').forEach((b) => b.onclick = () => openDeal(state.deals.find((d) => String(d.id) === b.dataset.id)));
+      ${cards || `<div class="card muted">${filtering ? '没有找到，换个词试试，或者点“全部”。' : '还没有记账。点“记一单”开始。'}</div>`}`;
+    box.querySelectorAll('button[data-id]').forEach((b) => b.onclick = () => openDeal(state.deals.find((d) => String(d.id) === b.dataset.id)));
   }
 
   function openSheet(html, label) {
@@ -295,8 +333,8 @@
     sheet.innerHTML = html; document.body.appendChild(sheet); return sheet;
   }
 
-  function openDeal(deal) {
-    const d = deal ? JSON.parse(JSON.stringify(deal)) : { deal_date: today(), type: '二手买卖', title: '', owner_name: '', customer_name: '', incomes: [], expenses: [], listing_agents: [], client_agents: [], note: '' };
+  function openDeal(deal, prefill) {
+    const d = deal ? JSON.parse(JSON.stringify(deal)) : { deal_date: today(), type: '二手买卖', title: '', owner_name: '', customer_name: '', incomes: [], expenses: [], listing_agents: [], client_agents: [], note: '', ...(prefill || {}) };
     const locked = deal && deal.status === 'locked';
     const p = deal ? progress(deal) : null;
     const names = state.agents.filter((a) => a.active || d.listing_agents.includes(a.name) || d.client_agents.includes(a.name)).map((a) => a.name);
@@ -317,7 +355,9 @@
     const moneyRows = (kind, types) => types.map((t) => {
       if (kind === 'expenses' && MULTI.includes(t)) return multiRow(t);
       const it = d[kind].find((x) => x.type === t);
-      const bank = t === '银行返点' ? `<input class="bank" data-bank="1" value="${esc(it && it.bank || '')}" placeholder="哪家银行，例如：农行" ${it && !locked ? '' : 'disabled'} aria-label="哪家银行" style="grid-column:1/-1">` : '';
+      const bank = t === '银行返点' ? `<input class="bank" data-bank="1" value="${esc(it && it.bank || '')}" placeholder="哪家银行，例如：农行" ${it && !locked ? '' : 'disabled'} aria-label="哪家银行" style="grid-column:1/-1">`
+        : t === '其他收入' && kind === 'incomes' && !C.oneSide(d.type) ? `<select class="paid" data-side="1" ${it && !locked ? '' : 'disabled'} aria-label="其他收入跟谁分" style="grid-column:1/-1">
+            <option value="client" ${it && it.side === 'listing' ? '' : 'selected'}>跟客户方分</option><option value="listing" ${it && it.side === 'listing' ? 'selected' : ''}>跟房源方分</option></select>` : '';
       const ex = kind === 'expenses' && EXTRA_FIELD[t];
       // 以前的数据维护费也写在介绍人里，这里当备注显示
       const xv = ex === 'person' ? (it && it.person) || '' : ex === 'memo' ? (it && (it.memo || it.person)) || '' : '';
@@ -345,18 +385,28 @@
         <div class="card stack">
           <label class="field">日期<input type="date" id="f-date" value="${d.deal_date}" ${dis}></label>
           <div style="display:flex;flex-direction:column;gap:4px"><span class="small muted">房屋类型</span>
-            <div class="seg" role="group" aria-label="房屋类型">${C.DEAL_TYPES.map((t) => `<button type="button" data-type="${t}" aria-pressed="${d.type === t}" ${dis}>${t}</button>`).join('')}</div></div>
-          <label class="field">房子 / 说明<input id="f-title" value="${esc(d.title)}" placeholder="例如：幸福小区 3-502" ${dis}></label>
+            <div class="seg types" role="group" aria-label="房屋类型">${C.DEAL_TYPES.map((t) => `<button type="button" data-type="${t}" aria-pressed="${d.type === t}" ${dis}>${t === '二手买卖' ? '二手' : t === '合作' ? '🤝 合作' : t}</button>`).join('')}</div></div>
+          <div class="field" id="house-box"><span>房子</span>
+            <div class="lf-pair"><select id="f-comm" aria-label="小区" ${dis}></select><input id="f-unit" list="f-units" value="" placeholder="坐落，例如 7幢601" aria-label="坐落" autocomplete="off" ${dis}></div>
+            <input id="f-comm-other" placeholder="写小区名字" aria-label="其他小区名字" hidden ${dis}>
+            <datalist id="f-units"></datalist>
+            <div id="f-house-info" class="small muted"></div></div>
+          <label class="field" id="partner-box" hidden>合作的中介<input id="f-partner" value="${esc(d.partner || '')}" placeholder="例如：我爱我家" ${dis}></label>
+          <label class="field" id="title-box" hidden>楼盘 / 房号（新房）<input id="f-title" value="${esc(d.title)}" placeholder="例如：某某新楼盘 3-502" ${dis}></label>
           <div class="row" style="flex-wrap:nowrap">
             <label class="field grow" id="owner-box" style="min-width:0">房东名字<input id="f-owner" value="${esc(d.owner_name || '')}" placeholder="例如：刘先生" ${dis}></label>
             <label class="field grow" style="min-width:0">客户名字<input id="f-cust" value="${esc(d.customer_name || '')}" placeholder="例如：陈女士" ${dis}></label>
           </div>
+          <div class="phones small" id="f-owner-phones"></div>
+          <div class="phones small">${d.customer_phone ? `客户电话（业务员填的）：<a class="tel" href="tel:${esc(d.customer_phone.replace(/[^\d+]/g, ''))}">${esc(d.customer_name || '客户')} ${esc(d.customer_phone)} 📞</a>`
+            : '<span class="muted">客户电话：不用你填，客户方业务员确认时会补上，补好了会自动显示在这里</span>'}</div>
         </div>
-        <div class="card"><h3>收入（勾选这一单有的）</h3><div id="income-rows"></div></div>
+        <div class="card"><h3>收入（勾选这一单有的）</h3><div id="income-rows"></div>
+          <div class="small muted" id="income-tip" style="margin-top:6px"></div></div>
         <div class="card"><h3>这一单的支出</h3><div id="expense-rows"></div>
           <div class="small muted" style="margin-top:6px">介绍费写介绍人名字。维护费一行一个人：选谁垫的钱、写备注（例如请吃饭）和金额，好几个人垫钱就点“＋ 再加一个人”。选了名字的，结算时这笔钱会还给这个人；店里（周姐）付的就选“周姐”。</div></div>
         <div class="card stack" id="listing-box"><h3>房源方业务员（可多选）</h3><div class="chips">${chips('listing_agents')}</div></div>
-        <div class="card stack"><h3>客户方业务员（可多选）</h3><div class="chips">${chips('client_agents')}</div></div>
+        <div class="card stack"><h3 id="client-h">客户方业务员（可多选）</h3><div class="chips">${chips('client_agents')}</div></div>
         <label class="field">备注<textarea id="f-note" rows="2" ${dis}>${esc(d.note)}</textarea></label>
         <div class="card stack"><h2>这一单怎么分</h2><div id="preview" aria-live="polite"></div></div>
 
@@ -370,8 +420,11 @@
 
     function drawIncomes() { $('#income-rows', sheet).innerHTML = moneyRows('incomes', C.INCOME_BY_TYPE[d.type]); $('#expense-rows', sheet).innerHTML = moneyRows('expenses', C.EXPENSE_BY_TYPE[d.type]); }
     function collect() {
-      d.deal_date = $('#f-date', sheet).value; d.title = $('#f-title', sheet).value.trim(); d.note = $('#f-note', sheet).value.trim();
-      d.owner_name = d.type === '新房' ? '' : $('#f-owner', sheet).value.trim(); d.customer_name = $('#f-cust', sheet).value.trim();
+      const h = house();
+      d.listing_id = d.type !== '新房' && h.listing ? h.listing.id : null;
+      d.deal_date = $('#f-date', sheet).value; d.note = $('#f-note', sheet).value.trim();
+      d.title = d.type === '新房' ? $('#f-title', sheet).value.trim() : h.comm || h.unit ? `${h.comm} ${h.unit}`.trim() : d.title;
+      d.owner_name = d.type === '新房' ? '' : $('#f-owner', sheet).value.trim(); d.partner = d.type === '合作' ? $('#f-partner', sheet).value.trim() : ''; d.customer_name = $('#f-cust', sheet).value.trim();
       ['incomes', 'expenses'].forEach((k) => {
         d[k] = [...sheet.querySelectorAll(`input[type=checkbox][data-kind=${k}]`)].filter((c) => c.checked).flatMap((c) => {
           if (c.dataset.multi) {
@@ -387,6 +440,8 @@
           const it = { type: c.dataset.t, amount: Number(v || 0) };
           const b = c.dataset.t === '银行返点' && sheet.querySelector('input[data-bank]');
           if (b && b.value.trim()) it.bank = b.value.trim();
+          const sd = k === 'incomes' && c.dataset.t === '其他收入' && sheet.querySelector('select[data-side]');
+          if (sd && sd.value === 'listing') it.side = 'listing';
           const ex = k === 'expenses' && EXTRA_FIELD[c.dataset.t];
           const xv = ex && sheet.querySelector(`input[data-x2="${c.dataset.t}"]`).value.trim();
           if (xv) it[ex] = xv;
@@ -398,9 +453,14 @@
     }
     function preview() {
       collect();
-      $('#listing-box', sheet).hidden = d.type === '新房';
+      $('#listing-box', sheet).hidden = C.oneSide(d.type);
+      $('#client-h', sheet).textContent = d.type === '合作' ? '这一单的业务员（可多选，平分业务员那一半）' : '客户方业务员（可多选）';
+      $('#partner-box', sheet).hidden = d.type !== '合作';
+      $('#income-tip', sheet).textContent = d.type === '合作' ? '只有“合作总佣金”和合作中介对半分。返点和其他收入不给合作中介、不扣 10%，全部是店面一半、这一单的业务员平分一半。'
+        : d.type === '新房' ? '返点都不扣 10%，新房全部归客户方：店面一半、业务员一半。'
+        : '返点都不扣 10%，也不按 20/80 分：银行返点、装修返点归客户方，垫资返点归房源方，其他收入选跟哪一方分。每一方还是店面一半、业务员一半。';
       $('#owner-box', sheet).hidden = d.type === '新房';
-      const view = { ...d, listing_agents: d.type === '新房' ? [] : d.listing_agents };
+      const view = { ...d, listing_agents: C.oneSide(d.type) ? [] : d.listing_agents };
       $('#preview', sheet).innerHTML = breakdownHTML(view);
     }
     sheet.addEventListener('input', (e) => {
@@ -424,6 +484,7 @@
           const ps = sheet.querySelector(`select[data-paid="${t}"]`); if (ps) { ps.disabled = !on; ps.hidden = !on; if (!on) ps.value = ''; }
         }
         if (t === '银行返点') { const bk = sheet.querySelector('input[data-bank]'); bk.disabled = !on; if (!on) bk.value = ''; }
+        if (t === '其他收入' && k === 'incomes') { const sd = sheet.querySelector('select[data-side]'); if (sd) { sd.disabled = !on; if (!on) sd.value = 'client'; } }
       }
       preview();
     });
@@ -456,10 +517,58 @@
       collect();
       if (!d.deal_date) return toast('请选日期');
       if (!d.incomes.length) return toast('请至少勾选一项收入');
-      if (d.type === '新房') d.listing_agents = [];
+      if (C.oneSide(d.type)) d.listing_agents = [];
+      if (d.type === '合作' && !d.partner) return toast('请写合作的中介名字');
       if (!U.people(d).length) return toast('请先选这一单的业务员');
+      if (d.type !== '新房') {
+        const h = house();
+        if (!h.comm || !h.unit) return toast('请选小区、填坐落');
+        if (!h.listing) {
+          // 房源里没有：自动新建一条（只有基本信息），和这一单绑在一起
+          const nl = { kind: d.type === '租房' ? '出租' : '出售', community: h.comm, unit: h.unit, owners: d.owner_name ? d.owner_name.split(/[、，,\s]+/).filter(Boolean).map((n) => ({ name: n, phone: '' })) : [], agents: (d.type === '合作' ? d.client_agents : d.listing_agents).slice(), status: 'active', note: '', note_log: [], elevator: false, needs_info: true, created_at: today() };
+          d.listing_id = await run(() => S.saveListing(nl));
+        }
+      }
       await run(() => S.saveDeal(d, send)); close(); toast(deal ? '已保存' : '已保存，打开这一单可以生成结算单发到群里'); await reload();
     };
+    // 房子：只填小区 + 坐落。房源里有这套就自动关联；没有的话，保存时自动新建一条房源（详细信息以后到房源里补）
+    const cur = state.listings.find((l) => l.id === d.listing_id);
+    const extraC = [...new Set(state.listings.map((l) => l.community).filter((c) => c && !COMMUNITIES.includes(c)))];
+    const allC = [...COMMUNITIES, ...extraC];
+    const fComm = $('#f-comm', sheet), fOther = $('#f-comm-other', sheet), fUnit = $('#f-unit', sheet);
+    // 老单子没关联房源：小区认得出来就拆开，认不出来就整段放进坐落
+    let c0 = cur ? cur.community : '', u0 = cur ? cur.unit : '';
+    if (!cur && d.title && d.type !== '新房') { const m = allC.find((c) => d.title.startsWith(c)); if (m) { c0 = m; u0 = d.title.slice(m.length).trim(); } else u0 = d.title; }
+    const isOther = c0 && !allC.includes(c0);
+    fComm.innerHTML = `<option value="">选小区</option><option value="__other" ${isOther ? 'selected' : ''}>其他（自己填）</option>${allC.map((c) => `<option ${c === c0 ? 'selected' : ''}>${esc(c)}</option>`).join('')}`;
+    fOther.value = isOther ? c0 : ''; fOther.hidden = !isOther; fUnit.value = u0;
+    function house() {
+      const comm = (fComm.value === '__other' ? fOther.value : fComm.value).trim(), unit = fUnit.value.trim();
+      const k = houseKey({ community: comm, unit });
+      return { comm, unit, listing: comm && unit ? state.listings.find((l) => houseKey(l) === k) : null };
+    }
+    let autoOwner = '';
+    const showHouse = () => {
+      const isNew = d.type === '新房';
+      $('#house-box', sheet).hidden = isNew; $('#title-box', sheet).hidden = !isNew;
+      if (isNew) { $('#f-owner-phones', sheet).innerHTML = ''; return; }
+      $('#f-units', sheet).innerHTML = state.listings.filter((l) => l.community === house().comm && l.status === 'active').map((l) => `<option value="${esc(l.unit)}">`).join('');
+      const h = house(), info = $('#f-house-info', sheet), op = $('#f-owner-phones', sheet);
+      const ph = h.listing ? (h.listing.owners || []).filter((o) => o.phone) : [];
+      op.innerHTML = d.type === '新房' ? '' : ph.length ? '房东电话（房源里的）：' + ph.map((o) => `<a class="tel" href="tel:${esc(o.phone.replace(/[^\d+]/g, ''))}">${esc(o.name)} ${esc(o.phone)} 📞</a>`).join('　')
+        : `<span class="muted">房东电话：${h.listing ? '房源里还没填，房源维护人补资料时会填上' : '保存后建好房源，房源维护人补资料时会填上'}，填好会自动显示在这里</span>`;
+      const own = $('#f-owner', sheet);
+      // 房东名字跟着关联的房源走：换了房子，之前自动带出来的名字也换掉（手动改过的不动）
+      const names = h.listing ? (h.listing.owners || []).map((o) => o.name).filter(Boolean).join('、') : '';
+      if (!own.value.trim() || own.value === autoOwner) { own.value = names; autoOwner = names; }
+      if (!h.comm || !h.unit) { info.textContent = '选小区、填坐落，房源里有的会自动关联'; return; }
+      if (h.listing && h.listing.id !== (deal && deal.listing_id) && h.listing.status !== 'active') { info.textContent = `⚠ 这套房源已经是“${L_STATUS[h.listing.status](h.listing.kind)}”，确认没有记重吗？`; return; }
+      info.textContent = h.listing ? (deal && h.listing.id === deal.listing_id ? `✓ 已关联房源（${L_STATUS[h.listing.status](h.listing.kind)}），详细信息在“房源”里看` : '✓ 已关联房源，保存后房源自动变成已售 / 已租') : '房源里还没有这套，保存时会自动新建一条房源（详细信息以后到房源里补）';
+    };
+    fComm.onchange = () => { fOther.hidden = fComm.value !== '__other'; if (!fOther.hidden) fOther.focus(); showHouse(); preview(); };
+    fOther.oninput = fUnit.oninput = () => { showHouse(); };
+    sheet.querySelectorAll('[data-type]').forEach((b) => b.addEventListener('click', () => setTimeout(showHouse)));
+    showHouse();
     if ($('#s-save', sheet)) $('#s-save', sheet).onclick = () => save(true); // 保存后直接进入待确认
     drawIncomes(); preview();
   }
@@ -730,7 +839,7 @@
           <h3>四、每一单的详细记录</h3>
           ${deals.map((d) => dealDetail(d, !internal, false)).join('')}`}
           ${single && d0.status !== 'locked' ? `<div class="notice info">请相关业务员核对后，打开确认链接点“确认无误”：${esc(CONFIRM_URL())}</div>` : ''}
-          <div class="small muted">分账规则：每单总账 = 收入 − 支出；再扣店面维护成本是纯利润（只扣佣金部分：（佣金 − 支出）× 10%，返点等其他收入不扣；新房不扣）；纯利润按房源方 20%、客户方 80% 分（新房全部算客户方）；每一块店面和业务员各一半，业务员那一半由这一单的业务员平分。除不尽的零头归业务员。业务员先垫付的支出，结算时加回给垫付的人。</div>
+          <div class="small muted">分账规则：每单总账 = 收入 − 支出；再扣店面维护成本是纯利润（只扣佣金部分：（佣金 − 支出）× 10%，返点等其他收入不扣；新房不扣）；佣金部分的纯利润按房源方 20%、客户方 80% 分（新房全部算客户方）；返点直接归一方：银行返点、装修返点归客户方，垫资返点归房源方，其他收入看记账时选的哪一方；合作单（和别的中介合作）总佣金一半给对方，我们这一半不扣 10%，店面一半、业务员平分一半；每一块店面和业务员各一半，业务员那一半由这一单的业务员平分。除不尽的零头归业务员。业务员先垫付的支出，结算时加回给垫付的人。</div>
           <div class="small muted">生成时间：${new Date().toLocaleString('zh-CN')}</div>
         </div>
       </div>
@@ -739,6 +848,220 @@
     document.body.classList.add('printing');
     $('#sclose', sheet).onclick = () => { sheet.remove(); document.body.classList.remove('printing'); if (onClose) onClose(); };
     bindExport(sheet, title);
+  }
+
+  // ---------- 房源记录 ----------
+  const fmtTime = (t) => { if (!t) return ''; const d = new Date(t); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+  const feedbackHTML = (fb) => (fb && fb.length) ? `<div class="fb-list">${fb.slice().reverse().map((x) => `<div class="fb"><div class="small muted"><b>${esc(x.author)}</b>　${fmtTime(x.created_at)}</div><div>${esc(x.content)}</div></div>`).join('')}</div>` : '<div class="small muted">还没有反馈</div>';
+  const L_STATUS = { active: (k) => k === '出租' ? '在租' : '在售', done: (k) => k === '出租' ? '已租' : '已售', off: () => '下架' };
+  const houseKey = (x) => ((x.community || '') + '|' + (x.unit || '')).replace(/\s/g, '');
+  const priceText = (x) => x.price == null || x.price === '' ? '价格未填' : x.kind === '出租' ? `${Number(x.price).toLocaleString()} 元/月` : `${Number(x.price).toLocaleString()} 万`;
+  const lTag = (k) => `<span class="tc ${k === '出租' ? 'tt-b' : 'tt-a'}">${k === '出租' ? '出租' : '出售'}</span>`;
+  // ===== 房源：店面和业务员两边共用（改的时候两个文件一起改） =====
+  const CATS = ['小户', '小户带阁楼', '中户', '中户带阁楼', '大户', '大户带阁楼', '特大户', '特大户带阁楼', '商品房', '商铺'];
+  const zones = (name, n) => Array.from({ length: n }, (_, i) => `${name}${'一二三四五六七八九'[i]}区`);
+  const COMMUNITIES = ['东亭家园', '厦亭家园', ...zones('怡邻花园', 5), '悬珠花园', '阳澄人家', '亭南新村', ...zones('青苑新村', 6), ...zones('畅苑新村', 4), '青灯新村', '亭苑', '金陵花园', '绿地', '融锦苑', '雍合湾', '唯锦苑', '唯亭苑'];
+  const layoutText = (x) => x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
+  const specLine = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : '', x.decoration, x.elevator ? '有电梯' : '没电梯'].filter(Boolean).map(esc).join(' · ');
+  const LF0 = { kind: '', status: 'active', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
+  const matchListing = (x, F, noStatus) => {
+    const kw = (F.q || '').trim();
+    if (!noStatus && F.status && x.status !== F.status) return false;
+    if (F.kind && x.kind !== F.kind) return false;
+    if (F.comm && x.community !== F.comm) return false;
+    if (F.cat && x.category !== F.cat) return false;
+    if (F.rooms !== '' && !(F.rooms === '5' ? x.rooms >= 5 : x.rooms === Number(F.rooms))) return false;
+    if (F.halls !== '' && !(x.rooms != null && (F.halls === '3' ? x.halls >= 3 : (x.halls || 0) === Number(F.halls)))) return false;
+    if (F.amin !== '' && !(x.area >= Number(F.amin))) return false;
+    if (F.amax !== '' && !(x.area != null && x.area <= Number(F.amax))) return false;
+    if (F.elev !== '' && !!x.elevator !== (F.elev === '1')) return false;
+    return !kw || window.Calc.fuzzy([x.community + x.unit, x.category, layoutText(x), ...(x.owners || []).flatMap((o) => [o.name, o.phone]), ...(x.agents || []), x.note], kw);
+  };
+  // 筛选卡：每一行左边是名字，右边是选项，一眼看清
+  const filterCard = (F, list, statuses) => {
+    const seg = (k, opts) => `<div class="seg" style="grid-template-columns:repeat(${opts.length},1fr)">${opts.map(([v, t]) => `<button type="button" data-fs="${k}" data-v="${v}" aria-pressed="${F[k] === v}">${t}</button>`).join('')}</div>`;
+    const sel = (k, opts) => `<select data-f="${k}" aria-label="${k}">${opts.map(([v, t]) => `<option value="${esc(v)}" ${F[k] === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+    const LS = { active: '未成交', done: '已成交', off: '下架' };
+    const comms = [...COMMUNITIES, ...[...new Set(list.map((x) => x.community).filter((c) => c && !COMMUNITIES.includes(c)))].sort((a, b) => a.localeCompare(b, 'zh'))];  // 后来录入的新小区排在后面
+    return `<div class="card lf">
+      <div class="lf-head"><h3>找房源</h3>${Object.keys(LF0).some((k) => F[k] !== LF0[k]) || F.q ? '<button type="button" data-fclear class="linkish">清空条件</button>' : ''}</div>
+      <input id="lq" value="${esc(F.q || '')}" placeholder="搜坐落、房东、电话、备注" aria-label="搜索房源">
+      <div class="lf-row"><span>买卖</span>${seg('kind', [['', '全部'], ['出售', '出售'], ['出租', '出租']])}</div>
+      <div class="lf-row"><span>状态</span>${seg('status', [...statuses.map((s) => [s, LS[s]]), ['', '全部']])}</div>
+      <div class="lf-row"><span>小区</span>${sel('comm', [['', '全部小区'], ...comms.map((c) => [c, c])])}</div>
+      <div class="lf-row"><span>户型</span>${sel('cat', [['', '全部户型'], ...CATS.map((c) => [c, c])])}</div>
+      <div class="lf-row"><span>室厅</span><div class="lf-pair">${sel('rooms', [['', '几室'], ['1', '1室'], ['2', '2室'], ['3', '3室'], ['4', '4室'], ['5', '5室以上']])}${sel('halls', [['', '几厅'], ['0', '0厅'], ['1', '1厅'], ['2', '2厅'], ['3', '3厅以上']])}</div></div>
+      <div class="lf-row"><span>面积</span><div class="lf-range"><span>从</span><input data-f="amin" inputmode="decimal" value="${esc(F.amin)}" placeholder="例如 60" aria-label="面积从多少平方米"><span>到</span><input data-f="amax" inputmode="decimal" value="${esc(F.amax)}" placeholder="例如 90" aria-label="面积到多少平方米"><span>㎡</span></div></div>
+      <div class="lf-row"><span>电梯</span>${seg('elev', [['1', '有电梯'], ['0', '没电梯']])}</div>
+    </div>`;
+  };
+  const bindFilter = (root, F, redraw) => {
+    const keep = (sel, fn) => Promise.resolve(redraw()).then(() => { const n = root.querySelector(sel); if (n) { n.focus(); fn(n); } });
+    root.querySelectorAll('[data-fs]').forEach((b) => b.onclick = () => { const k = b.dataset.fs; F[k] = k === 'elev' && F[k] === b.dataset.v ? '' : b.dataset.v; redraw(); });  // 电梯再点一次就取消
+    root.querySelectorAll('select[data-f]').forEach((el) => el.onchange = () => { F[el.dataset.f] = el.value; redraw(); });
+    root.querySelectorAll('input[data-f]').forEach((el) => el.oninput = () => { F[el.dataset.f] = el.value.replace(/[^\d.]/g, ''); keep(`input[data-f="${el.dataset.f}"]`, (n) => n.setSelectionRange(n.value.length, n.value.length)); });
+    const q = root.querySelector('#lq'); if (q) q.oninput = () => { F.q = q.value; const pos = q.selectionStart; keep('#lq', (n) => n.setSelectionRange(pos, pos)); };
+    const c = root.querySelector('[data-fclear]'); if (c) c.onclick = () => { Object.assign(F, LF0, { q: '' }); redraw(); };
+  };
+  // 备注修改记录：一直显示，最新 3 条直接看到，更早的点开看
+  const noteLogHTML = (x) => {
+    const g = (x.note_log || []).slice().reverse();
+    const row = (h) => `<div class="fb"><div class="small muted"><b>${esc(h.by)}</b>　${fmtTime(h.at)}</div><div>${h.note ? esc(h.note) : '<span class="muted">（清空了备注）</span>'}</div></div>`;
+    return `<div class="stack" style="gap:6px"><span class="small muted">备注修改记录（${g.length} 次）</span>
+      ${g.length ? `<div class="fb-list">${g.slice(0, 3).map(row).join('')}</div>${g.length > 3 ? `<details><summary class="small muted" style="cursor:pointer">更早的 ${g.length - 3} 次</summary><div class="fb-list" style="margin-top:6px">${g.slice(3).map(row).join('')}</div></details>` : ''}` : '<div class="small muted">还没有人改过备注</div>'}</div>`;
+  };
+  function renderListings() {
+    const F = state.lf = { ...LF0, q: '', ...state.lf };
+    const list = state.listings.filter((x) => matchListing(x, F));
+    const hasDeal = (x) => state.deals.some((d) => d.listing_id === x.id);
+    const card = (x) => `<div class="card listing${x.status === 'active' ? '' : ' off'}" data-l="${x.id}" role="button" tabindex="0">
+        <div class="row" style="gap:10px;flex-wrap:nowrap">${lTag(x.kind)}
+          <div class="grow" style="min-width:0;text-align:left"><b style="font-size:18px">${esc(x.community || '（没写小区）')} ${esc(x.unit)}</b>
+            <div class="small muted">${x.needs_info ? '<span class="pill warn">等维护人补全</span>' : specLine(x)}</div></div>
+          <div style="text-align:right;flex:none"><b class="num" style="font-size:18px;color:var(--accent)">${priceText(x)}</b><div class="small muted">${L_STATUS[x.status](x.kind)}</div></div></div>
+        <div class="small muted" style="text-align:left">房源维护人 ${esc((x.agents || []).join('、') || '—')} · 房东 ${esc((x.owners || []).map((o) => o.name).filter(Boolean).join('、') || '—')} · <span class="num">${esc(x.created_at)}</span></div>
+        ${x.note ? `<div class="small" style="text-align:left">${esc(x.note)}</div>` : ''}
+        ${(x.feedback || []).length ? `<div class="small muted" style="text-align:left">最新反馈（共 ${x.feedback.length} 条）：${esc(x.feedback[x.feedback.length - 1].author)}：${esc(x.feedback[x.feedback.length - 1].content)}</div>` : ''}
+        ${x.status === 'active' && !hasDeal(x) ? `<div class="row" style="justify-content:flex-end"><button class="btn-primary" data-ldeal="${x.id}">成交了，去记账 ›</button></div>` : hasDeal(x) ? '<div class="small muted" style="text-align:right">已经记过账</div>' : ''}</div>`;
+    shell(`
+      <button class="add-listing" id="ladd"><span class="plus">＋</span><span><b>录入新房源</b><span class="small">同一套房子只能录一次</span></span></button>
+      ${filterCard(F, state.listings, ['active', 'done', 'off'])}
+      <div class="lf-count">找到 <b>${list.length}</b> 套房源</div>
+      ${list.map(card).join('') || `<div class="card muted">${state.listings.length ? '没有符合条件的房源，可以点上面“清空条件”' : '还没有房源。点“＋ 录入新房源”开始记。'}</div>`}`);
+    $('#ladd').onclick = () => openListing(null);
+    bindFilter(app, F, renderListings);
+    app.querySelectorAll('[data-l]').forEach((b) => {
+      const go = (e) => { if (e.target.closest('a.tel')) return; const x = state.listings.find((y) => String(y.id) === b.dataset.l); if (e.target.closest('[data-ldeal]')) dealFromListing(x); else openListing(x); };
+      b.onclick = go; b.onkeydown = (e) => { if (e.key === 'Enter') go(e); };
+    });
+  }
+  // 从房源去记账：自动带上房子、房东、维护人，不用重复输入
+  function dealFromListing(x) {
+    state.tab = 'deals'; render();
+    openDeal(null, { listing_id: x.id, type: x.kind === '出租' ? '租房' : '二手买卖', title: `${x.community} ${x.unit}`, owner_name: (x.owners || []).map((o) => o.name).filter(Boolean).join('、'), listing_agents: (x.agents || []).slice() });
+    toast(`房子已经带过来了，填好钱保存，房源就会自动变成“${L_STATUS.done(x.kind)}”`);
+  }
+  function openListing(src) {
+    const x = src ? JSON.parse(JSON.stringify(src)) : { kind: state.lf.kind || '出售', community: '', unit: '', category: '', rooms: null, halls: null, elevator: false, area: '', decoration: '', price: '', owners: [], agents: [], status: 'active', note: '', created_at: today() };
+    x.owners = x.owners || []; x.agents = x.agents || [];
+    const names = state.agents.filter((a) => a.active || x.agents.includes(a.name)).map((a) => a.name);
+    const deals = src ? state.deals.filter((d) => d.listing_id === src.id) : [];
+    const oline = (o) => `<div class="oline"><input data-on value="${esc(o ? o.name : '')}" placeholder="房东名字" aria-label="房东名字"><input data-op value="${esc(o ? o.phone : '')}" placeholder="电话" inputmode="tel" aria-label="房东电话"><button type="button" class="ocall" data-call aria-label="拨打这个电话">📞</button><button type="button" class="mdel" data-odel aria-label="删掉这个房东">×</button></div>`;
+    const opt = (list, v) => list.map((o) => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('');
+    const nopt = (n, v, suffix) => Array.from({ length: n }, (_, i) => `<option value="${i}" ${v === i ? 'selected' : ''}>${i}${suffix}</option>`).join('');
+    const inp = (id, label, v, ph, extra = '') => `<label class="field grow" style="min-width:0">${label}<input id="${id}" value="${esc(v == null ? '' : v)}" placeholder="${ph}" ${extra}></label>`;
+    // 有人用“其他”录过的新小区（例如唐宁府），以后录入和筛选都会自动出现
+    const extra = [...new Set(state.listings.map((l) => l.community).filter((c) => c && !COMMUNITIES.includes(c)))].sort((a, b) => a.localeCompare(b, 'zh'));
+    const other = x.community && !COMMUNITIES.includes(x.community) && !extra.includes(x.community);
+    // 房源维护人 = 负责的业务员：第一次保存后锁定，只有店面后台点“修改”才能改（业务员那边永远不能改）
+    let agentsLocked = !!(src && src.agents && src.agents.length);
+    const chipsHTML = () => agentsLocked ? `<b style="font-size:18px">${esc(x.agents.join('、'))}</b>` : names.map((n) => `<button type="button" class="chip" data-ag="${esc(n)}" aria-pressed="${x.agents.includes(n)}">${esc(n)}</button>`).join('');
+    const sheet = openSheet(`<div class="wrap stack">
+        <h2>${src ? '房源' : '录入新房源'}</h2>
+        ${x.needs_info ? `<div class="notice">这套是记账时自动建的，户型、面积这些还没填。房源维护人（${esc(x.agents.join('、') || '还没选')}）的后台会提示他们补全，谁先补完算谁的。你在这里直接填好保存也行。</div>`
+          : x.filled_by ? `<div class="small muted">记账时自动建的，${esc(x.filled_by)} 补全了详细信息</div>` : ''}
+        <div class="card stack">
+          <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
+          <label class="field">小区<select id="l-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
+          <input id="l-comm" value="${esc(other ? x.community : '')}" placeholder="写小区名字" aria-label="其他小区名字" ${other ? '' : 'hidden'}>
+          ${inp('l-unit', '坐落', x.unit, '例如：7号楼2单元601')}
+          <div id="l-dup" class="notice err" hidden></div>
+          <label class="field">户型分类<select id="l-cat"><option value="">—</option>${opt(CATS, x.category)}</select></label>
+          <div class="row" style="flex-wrap:nowrap" id="l-rh">
+            <label class="field grow" style="min-width:0">几室<select id="l-rooms"><option value="">—</option>${nopt(8, x.rooms, '室')}</select></label>
+            <label class="field grow" style="min-width:0">几厅<select id="l-halls"><option value="">—</option>${nopt(5, x.halls, '厅')}</select></label></div>
+          <div class="row" style="flex-wrap:nowrap">${inp('l-area', '面积（㎡）', x.area, '例如：118', 'inputmode="decimal"')}
+            <label class="field grow" style="min-width:0">装修<select id="l-deco"><option value="">—</option>${opt(['毛坯', '简装', '精装', '豪装'], x.decoration)}</select></label></div>
+          <div class="field"><span>电梯</span><div class="seg" role="group" aria-label="有没有电梯" style="grid-template-columns:repeat(2,1fr)">${[[true, '有电梯'], [false, '没电梯']].map(([v, t]) => `<button type="button" data-elev="${v}" aria-pressed="${!!x.elevator === v}">${t}</button>`).join('')}</div></div>
+          ${inp('l-price', `<span id="l-plabel">${x.kind === '出租' ? '月租（元）' : '总价（万元）'}</span>`, x.price, x.kind === '出租' ? '例如：2600' : '例如：168', 'inputmode="decimal"')}
+        </div>
+        <div class="card stack">
+          <div class="stack" style="gap:8px"><span class="small muted">房东（名字、电话）</span>
+            <div id="olines" class="stack" style="gap:8px">${(x.owners.length ? x.owners : [null]).map(oline).join('')}</div>
+            <button type="button" id="oadd" style="align-self:flex-start">＋ 再加一个房东</button>
+            ${deals.length ? `<span class="small muted" style="margin-top:6px">${x.kind === '出租' ? '租客' : '客户'}（名字、电话）</span>
+            ${deals.map((d) => `<div class="oline nodel cline" data-deal="${d.id}"><input data-cn value="${esc(d.customer_name || '')}" placeholder="等业务员填" aria-label="客户名字"><input data-cp value="${esc(d.customer_phone || '')}" placeholder="等业务员填" inputmode="tel" aria-label="客户电话"><button type="button" class="ocall" data-call aria-label="拨打这个电话">📞</button></div>`).join('')}
+            <div class="small muted">只有店面和这一单的客户方业务员能改。</div>` : ''}</div>
+          <div class="stack" style="gap:6px">
+            <div class="row between"><span class="small muted">房源维护人（负责的业务员，可多选）</span>${agentsLocked ? '<button type="button" id="ag-unlock" class="linkish">修改</button>' : ''}</div>
+            <div class="small muted" id="ag-tip">${agentsLocked ? '已锁定。第一次填好后就不能随便改，确实要换人请点“修改”（只有店面能改，业务员那边改不了）。' : '第一次保存后就会锁定。'}</div>
+            <div class="chips" id="ag-chips">${chipsHTML()}</div></div>
+          <label class="field">状态<select id="l-status">${['active', 'done', 'off'].map((s) => `<option value="${s}" ${x.status === s ? 'selected' : ''}>${L_STATUS[s](x.kind)}</option>`).join('')}</select></label>
+          ${deals.length ? `<div class="notice">这套房子已经记账：${deals.map((d) => `${esc(d.deal_date)} ${esc(d.title || d.type)}`).join('；')}</div>` : ''}
+        </div>
+        <div class="card stack"><h3>备注</h3>
+          <textarea id="l-note" rows="2" placeholder="例如：满五唯一、钥匙在店里、随时看房" aria-label="备注">${esc(x.note)}</textarea>
+          ${noteLogHTML(x)}</div>
+        ${src ? `<div class="card stack"><h3>联系反馈（${(x.feedback || []).length} 条）</h3>
+          <textarea id="fb-text" rows="2" placeholder="写一条反馈，例如：房东说价格可以再谈" aria-label="反馈内容"></textarea>
+          <button class="btn-primary" id="fb-add">添加反馈</button>
+          ${feedbackHTML(x.feedback)}</div>` : ''}
+        ${src && !deals.length ? '<button id="l-deal" class="btn-block">成交了，记一单</button>' : ''}
+      </div>
+      <div class="sheet-actions"><button id="l-cancel">取消</button>${src ? '<button id="l-del" class="btn-danger">删除</button>' : ''}<button id="l-save" class="btn-primary">保存</button></div>`, '房源');
+    const close = () => sheet.remove();
+    const num = (v) => { v = String(v).replace(/[^\d.]/g, ''); return v === '' ? null : Number(v); };
+    const int = (v) => v === '' ? null : Number(v);
+    const commVal = () => { const v = $('#l-comm-sel', sheet).value; return (v === '__other' ? $('#l-comm', sheet).value : v).trim(); };
+    const findDup = () => { const k = houseKey({ community: commVal(), unit: $('#l-unit', sheet).value }); return !k.startsWith('|') && !k.endsWith('|') && state.listings.find((y) => y.id !== x.id && houseKey(y) === k); };
+    const showDup = () => { const d = findDup(), box = $('#l-dup', sheet); box.hidden = !d; if (d) box.textContent = `系统里已经有这套房子了：${d.community} ${d.unit}（${L_STATUS[d.status](d.kind)}，维护人 ${(d.agents || []).join('、') || '—'}），不能重复录入`; return d; };
+    $('#l-comm-sel', sheet).onchange = () => { const o = $('#l-comm-sel', sheet).value === '__other'; $('#l-comm', sheet).hidden = !o; if (o) $('#l-comm', sheet).focus(); showDup(); };
+    $('#l-comm', sheet).oninput = showDup; $('#l-unit', sheet).oninput = showDup;
+    const shop = () => { $('#l-rh', sheet).hidden = $('#l-cat', sheet).value === '商铺'; };
+    $('#l-cat', sheet).onchange = shop; shop();
+    sheet.querySelectorAll('[data-elev]').forEach((b) => b.onclick = () => { x.elevator = b.dataset.elev === 'true'; sheet.querySelectorAll('[data-elev]').forEach((y) => y.setAttribute('aria-pressed', y === b)); });
+    if ($('#ag-unlock', sheet)) $('#ag-unlock', sheet).onclick = (e) => {
+      agentsLocked = false; $('#ag-chips', sheet).innerHTML = chipsHTML(); e.target.remove();
+      $('#ag-tip', sheet).textContent = '现在可以改了，改好点“保存”，保存后又会锁上。';
+    };
+    const collect = () => {
+      const isShop = $('#l-cat', sheet).value === '商铺';
+      Object.assign(x, {
+        community: commVal(), unit: $('#l-unit', sheet).value.trim(), category: $('#l-cat', sheet).value,
+        rooms: isShop ? null : int($('#l-rooms', sheet).value), halls: isShop ? null : int($('#l-halls', sheet).value),
+        area: num($('#l-area', sheet).value), decoration: $('#l-deco', sheet).value,
+        price: num($('#l-price', sheet).value), status: $('#l-status', sheet).value, note: $('#l-note', sheet).value.trim(),
+        owners: [...sheet.querySelectorAll('#olines .oline')].map((ln) => ({ name: ln.querySelector('[data-on]').value.trim(), phone: ln.querySelector('[data-op]').value.trim() })).filter((o) => o.name || o.phone) });
+      x.layout = layoutText(x);
+    };
+    $('#oadd', sheet).onclick = () => { $('#olines', sheet).insertAdjacentHTML('beforeend', oline(null)); $('#olines', sheet).lastElementChild.querySelector('input').focus(); };
+    sheet.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-odel]');
+      if (del) { const box = $('#olines', sheet); if (box.children.length > 1) del.parentNode.remove(); else del.parentNode.querySelectorAll('input').forEach((i) => { i.value = ''; }); }
+      const ag = e.target.closest('[data-ag]');
+      if (ag && !agentsLocked) { const n = ag.dataset.ag, i = x.agents.indexOf(n); if (i >= 0) x.agents.splice(i, 1); else x.agents.push(n); ag.setAttribute('aria-pressed', i < 0); }
+    });
+    sheet.querySelectorAll('[data-kind]').forEach((b) => b.onclick = () => {
+      x.kind = b.dataset.kind; sheet.querySelectorAll('[data-kind]').forEach((y) => y.setAttribute('aria-pressed', y === b));
+      $('#l-plabel', sheet).textContent = x.kind === '出租' ? '月租（元）' : '总价（万元）'; $('#l-price', sheet).placeholder = x.kind === '出租' ? '例如：2600' : '例如：168';
+      $('#l-status', sheet).options[0].textContent = L_STATUS.active(x.kind); $('#l-status', sheet).options[1].textContent = L_STATUS.done(x.kind);
+    });
+    if ($('#fb-add', sheet)) $('#fb-add', sheet).onclick = async () => {
+      const t = $('#fb-text', sheet).value.trim(); if (!t) return toast('请先写反馈内容');
+      await run(() => S.addFeedback(x.id, '周姐', t)); await loadAll(); close(); openListing(state.listings.find((y) => y.id === x.id)); toast('反馈已添加');
+    };
+    const save = async () => {
+      collect();
+      if (showDup()) { toast('这套房子已经录过了，不能重复录入'); $('#l-dup', sheet).scrollIntoView({ block: 'center' }); return false; }
+      if (!x.community) { toast('请选小区（不在列表里就选第一个“其他”，自己填）'); return false; }
+      if (!x.unit) { toast('请填坐落'); return false; }
+      if ((src ? src.note || '' : '') !== x.note) { x.note_by = '周姐'; x.note_at = new Date().toISOString(); x.note_log = [...(x.note_log || []), { by: '周姐', at: x.note_at, note: x.note }]; }
+      delete x.feedback;
+      // 店面自己把户型面积填上了，就不用再等业务员补全
+      if (x.needs_info && (x.category || x.rooms != null || x.area)) { x.needs_info = false; x.filled_by = '周姐'; x.filled_at = new Date().toISOString(); }
+      for (const ln of sheet.querySelectorAll('.cline')) {  // 客户名字、电话改了就存回那一单
+        const d = state.deals.find((y) => String(y.id) === ln.dataset.deal), cn = ln.querySelector('[data-cn]').value.trim(), cp = ln.querySelector('[data-cp]').value.trim();
+        if (d && (cn !== (d.customer_name || '') || cp !== (d.customer_phone || ''))) await run(() => S.setCustomer(d.id, cn, cp));
+      }
+      await run(() => S.saveListing(x)); await loadAll(); return true;
+    };
+    $('#l-cancel', sheet).onclick = close;
+    $('#l-save', sheet).onclick = async () => { if (await save()) { close(); renderListings(); toast('已保存'); } };
+    if ($('#l-del', sheet)) twice($('#l-del', sheet), '再点一次删除', async () => { await run(() => S.deleteListing(x.id)); await loadAll(); close(); renderListings(); toast('已删除'); });
+    if ($('#l-deal', sheet)) $('#l-deal', sheet).onclick = async () => {
+      if (!(await save())) return;
+      close(); dealFromListing(x);
+    };
   }
 
   // ---------- 业务员 ----------
@@ -758,12 +1081,17 @@
         <h2>业务员个人密码</h2>
         <div class="notice">每个人的密码只私聊发给本人，<b>不要发到群里</b>。点“复制”会复制一段话（名字 + 密码 + 链接），粘贴到和这个人的私聊里发出去就行。</div>
         ${old ? `<div class="notice err">有 ${old} 个人的密码还是以前的手机后 4 位，同事之间可能都知道。建议点下面“全部换成新密码”，再一个个私发。</div>` : ''}
-        <div class="card agent-list">${list.map((a) => `<div class="agent-row"><b class="an">${esc(a.name)}</b><b class="num grow" style="letter-spacing:.1em;white-space:nowrap">${esc(a.phone4 || '—')}</b>${isLocked(a) ? agentPill(a) : ''}<button data-cp="${a.id}">复制</button></div>`).join('')}</div>
+        <div class="card agent-list">${list.map((a) => `<div class="agent-row"><b class="an">${esc(a.name)}</b><b class="num grow" style="letter-spacing:.1em;white-space:nowrap">${esc(a.phone4 || '—')}</b>${isLocked(a) ? agentPill(a) : ''}<button data-new="${a.id}">更新</button><button data-cp="${a.id}">复制</button></div>`).join('')}</div>
+        <div class="small muted">谁的密码弄丢了或者被别人知道了，点 TA 旁边的“更新”，只换 TA 一个人的，再把新密码私发给 TA。</div>
         <button id="regen-all">全部换成新密码（大家要重新输一次）</button>
       </div>
       <div class="sheet-actions"><button id="cclose" class="btn-block">返回</button></div>`, '业务员个人密码');
     $('#cclose', sheet).onclick = () => sheet.remove();
     sheet.querySelectorAll('[data-cp]').forEach((b) => b.onclick = () => copy(codeMsg(list.find((a) => String(a.id) === b.dataset.cp))));
+    sheet.querySelectorAll('[data-new]').forEach((b) => twice(b, '再点一次', async () => {
+      const a = list.find((x) => String(x.id) === b.dataset.new);
+      await run(() => S.setCode(a.id, newCode())); await reload(); sheet.remove(); openCodes(); toast(`${a.name}的密码已更新，点“复制”私发给 TA`);
+    }));
     twice($('#regen-all', sheet), '确定全部换？再点一次', async () => {
       await run(async () => { for (const a of list) { const c = newCode(); a.phone4 = c; await S.setCode(a.id, c); } });
       await reload(); sheet.remove(); openCodes(); toast('已全部换好，请一个个私发');
@@ -810,7 +1138,7 @@
     const mine = (d) => C.calcDeal(d).people[name] || 0;
     const tot = (list) => list.reduce((x, d) => x + mine(d), 0);
     const settled = ds.filter((d) => d.settlement_id), ready = ds.filter(canSettle), waiting = ds.filter((d) => d.status !== 'locked');
-    const role = (d) => [d.type !== '新房' && d.listing_agents.includes(name) ? '房源方' : '', d.client_agents.includes(name) ? '客户方' : ''].filter(Boolean).join('、');
+    const role = (d) => d.type === '合作' ? '合作' : [d.type !== '新房' && d.listing_agents.includes(name) ? '房源方' : '', d.client_agents.includes(name) ? '客户方' : ''].filter(Boolean).join('、');
     const stTxt = (d) => d.settlement_id ? '已结算' : d.status === 'locked' ? '已确认，等结算' : '等确认';
     const sheet = openSheet(`
       <div class="wrap stack">
@@ -848,16 +1176,13 @@
           <div>${esc(a.name)} 不用手机确认：TA 参与的单子，一发出去就自动算“已确认”，钱照常算、照常结算。其他人都确认后这一单自动锁定。</div>
           <div class="row"><button id="a-auto">改成要手机确认</button><button id="a-active">${a.active ? '停用' : '恢复'}</button></div>
         </div>` : a ? `<div class="card stack no-print" style="gap:10px">
-          <div class="row between"><h3>个人密码</h3>${agentPill(a)}</div>
-          <div class="row" style="gap:10px"><b class="num grow" style="font-size:28px;letter-spacing:.2em">${esc(a.phone4 || '—')}</b><button id="code-copy">复制发给 TA</button></div>
-          ${(a.phone4 || '').length < 6 ? '<div class="notice err small">这还是以前的手机后 4 位，同事可能知道，建议点“换一个新密码”。</div>' : ''}
+          <div class="row between"><h3>账号</h3>${agentPill(a)}</div>
           <div class="row">
-            <button id="code-new">换一个新密码</button>
             ${isLocked(a) ? '<button id="a-reset" class="btn-primary">解锁</button>' : a.device_token ? '<button id="a-reset">退出 TA 的手机</button>' : ''}
             <button id="a-active">${a.active ? '停用' : '恢复'}</button>
             <button id="a-auto">设成自动确认</button>
           </div>
-          <div class="small muted">不会用手机的人可以点“设成自动确认”：TA 的单子会自动算已确认，不用输密码。密码只私聊发给本人。业务员第一次打开确认链接时输入，输对以后这里显示“已绑定手机”。输错 5 次会锁住，要点“解锁”。怀疑密码被别人知道了，就点“换一个新密码”，再私发给本人。不在店里干了可以停用，以前的单子还在。</div>
+          <div class="small muted">密码在业务员页的“查看 / 私发业务员个人密码”里看和更新。不会用手机的人可以点“设成自动确认”：TA 的单子会自动算已确认。输错密码 5 次会锁住，要点“解锁”。不在店里干了可以停用，以前的单子还在。</div>
         </div>` : ''}
       </div>
       <div class="sheet-actions"><button id="aclose" class="btn-block">返回</button></div>`, name);
@@ -880,7 +1205,8 @@
   // ---------- 登录 ----------
   function renderLogin() {
     app.innerHTML = `<div class="wrap stack" style="max-width:420px;padding-top:40px">
-      <h1>文城房产记账</h1><div class="muted">请用店面账号登录（每台手机/电脑登录一次即可）</div>
+      <img src="icon-512.png" alt="文城房产" style="width:132px;height:132px;border-radius:28px;align-self:center;box-shadow:0 8px 24px rgba(0,0,0,.25)">
+      <h1 style="text-align:center">文城房产</h1><div class="muted">请用店面账号登录（每台手机/电脑登录一次即可）</div>
       ${/MicroMessenger/i.test(navigator.userAgent) ? '<div class="notice err">现在是在微信里打开的，微信会清掉登录，所以每次都要重新登录。请点右上角“···”，选“在浏览器打开”，再把它添加到手机主屏幕。</div>' : ''}
       <form id="lf" class="card stack">
         <label class="field">邮箱<input type="email" id="lf-email" autocomplete="username" required></label>
