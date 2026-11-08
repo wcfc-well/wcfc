@@ -362,7 +362,10 @@
     const bodyOf = (n) => '您还有 ' + Object.entries(t.per[n]).filter(([, v]) => v).map(([k, v]) => v + ' ' + LBL[k]).join('，') + '。点开处理一下。';
     const doNudge = async (names, btn) => {
       btn.disabled = true; btn.textContent = '正在发…';
-      try { await run(() => S.nudge(names)); } catch (e) { btn.disabled = false; btn.textContent = '再试一次'; return; }
+      try { await S.nudge(names); } catch (e) {
+        btn.disabled = false; btn.textContent = `🔔 一起催办（${names.length} 人）`;
+        toast(/nudges|schema cache/i.test(e.message || '') ? '催办还用不了：要先在 Supabase 里跑一次最新的 SQL' : (e.message || '没催成功，请再试一次')); return;
+      }
       let pushed = null;
       if (S.pushNudge && (window.APP_CONFIG || {}).pushPublicKey) { try { pushed = await S.pushNudge(names.map((n) => ({ name: n, body: bodyOf(n) }))); } catch (e) { pushed = null; } }
       await loadAll(); renderTodo();
