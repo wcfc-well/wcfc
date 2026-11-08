@@ -26,6 +26,7 @@
   const zones = (name, n) => Array.from({ length: n }, (_, i) => `${name}${'一二三四五六七八九'[i]}区`);
   const COMMUNITIES = ['东亭家园', '厦亭家园', ...zones('怡邻花园', 5), '悬珠花园', '阳澄人家', '亭南新村', ...zones('青苑新村', 6), ...zones('畅苑新村', 4), '青灯新村', '亭苑', '金陵花园', '绿地', '融锦苑', '雍合湾', '唯锦苑', '唯亭苑'];
   const layoutText = (x) => x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
+  const cardSpec = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : ''].filter(Boolean).map(esc).join(' · ') || '还没填户型';  // 列表卡片只放最简单的
   const specLine = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : '', x.decoration, x.elevator ? '有电梯' : '没电梯'].filter(Boolean).map(esc).join(' · ');
   const LF0 = { kind: '', status: 'active', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
   const matchListing = (x, F, noStatus) => {
@@ -92,13 +93,14 @@
       ${filterCard(LF, list, ['active', 'done'])}
       <div class="lf-count">找到 <b>${shown.length}</b> 套房源</div>
       ${shown.map((x) => `<button class="card listing${x.status === 'done' ? ' done' : ''}" data-l="${x.id}">
+        <div class="lstrip ${x.kind === '出租' ? 'k-rent' : 'k-sale'}"><span>${x.kind}</span><span>${(LST[x.status] || LST.active)(x.kind)}</span></div>
         ${x.status === 'done' ? `<span class="seal" aria-label="已成交">${x.kind === '出租' ? '已租' : '已售'}</span>` : ''}
-        <div class="row" style="gap:10px;flex-wrap:nowrap"><span class="tc ${x.kind === '出租' ? 'tt-b' : 'tt-a'}">${x.kind}</span>${x.photo_thumb ? `<img class="lthumb" data-lphoto="${x.id}" src="${x.photo_thumb}" alt="房子照片">` : ''}
-          <div class="grow" style="min-width:0;text-align:left"><b style="font-size:18px">${esc(x.community)} ${esc(x.unit)}</b>
-            <div class="small muted">${specLine(x)}</div></div>
-          <div style="text-align:right;flex:none">${x.deal_price != null ? `<b class="num" style="font-size:18px;color:#c0392b">成交 ${Number(x.deal_price).toLocaleString()} ${x.kind === '出租' ? '元/月' : '万'}</b><div class="small muted">挂牌 ${priceText(x)}</div>` : `<b class="num" style="font-size:18px;color:var(--accent)">${priceText(x)}</b><div class="small muted">${(LST[x.status] || LST.active)(x.kind)}</div>`}</div></div>
-        <div class="small muted" style="text-align:left">房源维护人 ${esc((x.agents || []).join('、') || '—')} · 房东 ${esc(owners(x))}</div>
-        ${x.feedback.length ? `<div class="small muted" style="text-align:left">反馈 ${x.feedback.length} 条，最新：${esc(x.feedback[x.feedback.length - 1].author)}：${esc(x.feedback[x.feedback.length - 1].content)}</div>` : ''}</button>`).join('') || '<div class="card muted">没有符合条件的房源</div>'}
+        <div class="row" style="gap:12px;flex-wrap:nowrap;align-items:flex-start">
+          <div class="grow stack" style="min-width:0;text-align:left;gap:2px"><b style="font-size:18px">${esc(x.community)} ${esc(x.unit)}</b>
+            <div class="small muted">${cardSpec(x)}</div>
+            <div>${x.deal_price != null ? `<b class="num" style="font-size:18px;color:#c0392b">成交 ${Number(x.deal_price).toLocaleString()} ${x.kind === '出租' ? '元/月' : '万'}</b> <span class="small muted">挂牌 ${priceText(x)}</span>` : `<b class="num" style="font-size:18px;color:var(--accent)">${priceText(x)}</b>`}</div></div>
+          ${x.photo_thumb ? `<img class="lphoto" data-lphoto="${x.id}" src="${x.photo_thumb}" alt="房子照片，点开看大图">` : ''}</div>
+        </button>`).join('') || '<div class="card muted">没有符合条件的房源</div>'}
     </div>`;
     bindDemo(); bindTabs();
     bindFilter(app, LF, listings);

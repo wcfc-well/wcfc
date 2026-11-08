@@ -327,4 +327,10 @@ a.tel{color:var(--accent);font-weight:700;text-decoration:underline;white-space:
 .sold-line{color:#c0392b;font-size:17px}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .seal{background:rgba(0,0,0,.35);color:#ff7b6b;border-color:#ff7b6b}}
 :root[data-theme="dark"] .seal{background:rgba(0,0,0,.35);color:#ff7b6b;border-color:#ff7b6b}
-.card.listing.done{padding-bottom:46px}
+.card.listing.done{padding-bottom:62px}
+.card.listing .seal{bottom:10px}
+.ph-chip{display:inline-flex;align-items:center;gap:4px;margin-top:4px;min-height:32px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--bg);color:var(--fg);font-size:14px;cursor:zoom-in}
+.lstrip{display:flex;justify-content:space-between;align-items:center;margin:-14px -14px 4px;padding:6px 14px;border-radius:var(--r) var(--r) 0 0;color:#fff;font-weight:900;font-size:15px;letter-spacing:2px}
+.lstrip span:last-child{font-weight:400;letter-spacing:0;opacity:.9;font-size:14px}
+.lstrip.k-sale{background:#17675a}.lstrip.k-rent{background:#9a5b13}
+.lphoto{flex:none;width:112px;height:84px;border-radius:10px;object-fit:cover;border:1px solid var(--line);cursor:zoom-in}

@@ -341,7 +341,7 @@
       if (!file) return null;
       const img = await loadImage(file);
       let photo = resizeTo(img, 1280, 0.78); if (photo.length > 1500000) photo = resizeTo(img, 1000, 0.65);
-      return { photo, photo_thumb: resizeTo(img, 320, 0.7) };
+      return { photo, photo_thumb: resizeTo(img, 640, 0.68) };
     },
     // 录入 / 修改房源时的照片框。返回 changed()：undefined = 没动；null = 删掉了；{photo, photo_thumb} = 新照片
     field(box, thumb, getFull) {
