@@ -1305,7 +1305,12 @@
   }
 
   async function start() {
-    if (!(await S.session())) return renderLogin();
+    if (!(await S.session())) {
+      // 这台手机已经用业务员身份确认过（比如旧的桌面图标），直接去业务员页，不显示店面登录
+      let t = null; try { t = localStorage.getItem('ledger_aunt_token'); } catch (e) { /* 忽略 */ }
+      if (t) { location.replace('confirm.html'); return; }
+      return renderLogin();
+    }
     await run(loadAll); render();
   }
   start();
