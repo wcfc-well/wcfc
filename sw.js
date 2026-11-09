@@ -1,5 +1,5 @@
 // 离线缓存页面本身（数据始终从云端读取）
-const CACHE = 'ledger-v47';
+const CACHE = 'ledger-v48';
 const FILES = ['./', './index.html', './confirm.html', './app.css', './app.js', './confirm.js', './calc.js', './store.js', './config.js', './manifest.json', './manifest-confirm.json', './vendor/supabase.js', './apple-touch-icon.png', './icon-192.png', './icon-512.png', './icon-144.png', './icon-96.png', './favicon.ico', './manifest-confirm.json'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });

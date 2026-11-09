@@ -1111,7 +1111,7 @@
     const comms = [...COMMUNITIES, ...[...new Set(list.map((x) => x.community).filter((c) => c && !COMMUNITIES.includes(c)))].sort((a, b) => a.localeCompare(b, 'zh'))];  // 后来录入的新小区排在后面
     return `<div class="card lf">
       <div class="lf-head"><h3>找房源</h3>${Object.keys(LF0).some((k) => F[k] !== LF0[k]) || F.q ? '<button type="button" data-fclear class="linkish">清空条件</button>' : ''}</div>
-      <input id="lq" value="${esc(F.q || '')}" placeholder="搜坐落、房东、电话、备注" aria-label="搜索房源">
+      <input id="lq" type="search" enterkeyhint="search" autocomplete="off" value="${esc(F.q || '')}" placeholder="搜坐落、房东、电话、备注" aria-label="搜索房源">
       <div class="lf-row"><span>买卖</span>${seg('kind', [['', '全部'], ['出售', '出售'], ['出租', '出租']])}</div>
       <div class="lf-row"><span>状态</span>${seg('status', [...statuses.map((s) => [s, LS[s]]), ['', '全部']])}</div>
       <div class="lf-row"><span>小区</span>${sel('comm', [['', '全部小区'], ...comms.map((c) => [c, c])])}</div>
@@ -1121,12 +1121,23 @@
       <div class="lf-row"><span>电梯</span>${seg('elev', [['1', '有电梯'], ['0', '没电梯']])}</div>
     </div>`;
   };
-  const bindFilter = (root, F, redraw) => {
-    const keep = (sel, fn) => Promise.resolve(redraw()).then(() => { const n = root.querySelector(sel); if (n) { n.focus(); fn(n); } });
+  const bindFilter = (root, F, redraw, list) => {
     root.querySelectorAll('[data-fs]').forEach((b) => b.onclick = () => { const k = b.dataset.fs; F[k] = k === 'elev' && F[k] === b.dataset.v ? '' : b.dataset.v; redraw(); });  // 电梯再点一次就取消
     root.querySelectorAll('select[data-f]').forEach((el) => el.onchange = () => { F[el.dataset.f] = el.value; redraw(); });
-    root.querySelectorAll('input[data-f]').forEach((el) => el.oninput = () => { F[el.dataset.f] = el.value.replace(/[^\d.]/g, ''); keep(`input[data-f="${el.dataset.f}"]`, (n) => n.setSelectionRange(n.value.length, n.value.length)); });
-    const q = root.querySelector('#lq'); if (q) q.oninput = () => { F.q = q.value; const pos = q.selectionStart; keep('#lq', (n) => n.setSelectionRange(pos, pos)); };
+    // 搜索框不整页重画：苹果手机打拼音时整页重画会把输入法打断、键盘收起，就搜不了了。这里只把不符合的房子藏起来
+    const q = root.querySelector('#lq');
+    const apply = () => {
+        if (q) F.q = q.value; let n = 0;
+        root.querySelectorAll('[data-l]').forEach((c) => { const x = list.find((y) => String(y.id) === c.dataset.l); const ok = !!x && matchListing(x, F); c.style.display = ok ? '' : 'none'; if (ok) n++; });
+        const cnt = root.querySelector('.lf-count b'); if (cnt) cnt.textContent = n;
+        const e = root.querySelector('#lq-empty'); if (e) e.style.display = n ? 'none' : '';
+    };
+    if (q) {
+      q.addEventListener('input', (e) => { if (!e.isComposing) apply(); });
+      q.addEventListener('compositionend', apply);
+      q.addEventListener('search', apply);
+    }
+    root.querySelectorAll('input[data-f]').forEach((el) => el.oninput = () => { F[el.dataset.f] = el.value.replace(/[^\d.]/g, ''); apply(); });
     const c = root.querySelector('[data-fclear]'); if (c) c.onclick = () => { Object.assign(F, LF0, { q: '' }); redraw(); };
   };
   // 备注修改记录：一直显示，最新 3 条直接看到，更早的点开看
@@ -1138,9 +1149,10 @@
   };
   function renderListings() {
     const F = state.lf = { ...LF0, q: '', ...state.lf };
-    const list = state.listings.filter((x) => matchListing(x, F));
+    const base = state.listings.filter((x) => matchListing(x, { ...F, q: '', amin: '', amax: '' }));  // 搜索框的字在页面上直接筛，不重画
+    const hit = (x) => matchListing(x, F); const list = base.filter(hit);
     const hasDeal = (x) => state.deals.some((d) => d.listing_id === x.id);
-    const card = (x) => `<div class="card listing${x.status === 'off' ? ' off' : x.status === 'done' ? ' done' : ''}" data-l="${x.id}" role="button" tabindex="0">
+    const card = (x) => `<div class="card listing${x.status === 'off' ? ' off' : x.status === 'done' ? ' done' : ''}" data-l="${x.id}" role="button" tabindex="0"${hit(x) ? '' : ' style="display:none"'}>
         <div class="lstrip ${x.kind === '出租' ? 'k-rent' : 'k-sale'}"><span>${x.kind === '出租' ? '出租' : '出售'}</span><span>${L_STATUS[x.status](x.kind)}</span></div>
         ${x.status === 'done' ? `<span class="seal" aria-label="已成交">${x.kind === '出租' ? '已租' : '已售'}</span>` : ''}
         <div class="row" style="gap:12px;flex-wrap:nowrap;align-items:flex-start">
@@ -1153,9 +1165,10 @@
       <button class="add-listing" id="ladd"><span class="plus">＋</span><span><b>录入新房源</b><span class="small">同一套房子只能录一次</span></span></button>
       ${filterCard(F, state.listings, ['active', 'done', 'off'])}
       <div class="lf-count">找到 <b>${list.length}</b> 套房源</div>
-      ${list.map(card).join('') || `<div class="card muted">${state.listings.length ? '没有符合条件的房源，可以点上面“清空条件”' : '还没有房源。点“＋ 录入新房源”开始记。'}</div>`}`);
+      ${base.map(card).join('')}
+      <div class="card muted" id="lq-empty"${list.length ? ' style="display:none"' : ''}>${state.listings.length ? '没有符合条件的房源，可以点上面“清空条件”' : '还没有房源。点“＋ 录入新房源”开始记。'}</div>`);
     $('#ladd').onclick = () => openListing(null);
-    bindFilter(app, F, renderListings);
+    bindFilter(app, F, renderListings, state.listings);
     app.querySelectorAll('[data-l]').forEach((b) => {
       const go = (e) => { if (e.target.closest('a.tel')) return; if (e.target.closest('[data-lphoto]')) { e.stopPropagation(); return Photo.show(S.listingPhoto(Number(b.dataset.l))); } const x = state.listings.find((y) => String(y.id) === b.dataset.l); if (e.target.closest('[data-ldeal]')) dealFromListing(x); else openListing(x); };
       b.onclick = go; b.onkeydown = (e) => { if (e.key === 'Enter') go(e); };
