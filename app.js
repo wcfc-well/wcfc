@@ -747,10 +747,31 @@
       return { comm, unit, listing: comm && unit ? state.listings.find((l) => houseKey(l) === k) : null };
     }
     let autoOwner = '';
+    // 重复记账：房子一填好就查，重复的话下面全部锁住，不让继续填
+    const setDupLock = (twin) => {
+      const card = $('#f-date', sheet).closest('.card');
+      const keep = (el) => el.querySelector('#f-date, [data-type], #house-box, #title-box') || el.matches('#house-box, #title-box');
+      [...card.children].forEach((c) => c.classList.toggle('dup-lock', !!twin && !keep(c)));
+      for (let n = card.nextElementSibling; n; n = n.nextElementSibling) n.classList.toggle('dup-lock', !!twin);
+      const sv = $('#s-save', sheet); if (sv) sv.disabled = !!twin;
+      const hi = $('#f-house-info', sheet); if (hi) hi.style.display = twin ? 'none' : '';
+      let box = $('#dup-box', sheet);
+      if (!twin) { if (box) box.remove(); return; }
+      if (!box) { box = document.createElement('div'); box.id = 'dup-box'; box.className = 'notice err stack'; box.style.gap = '8px'; ($('#house-box', sheet).hidden ? $('#title-box', sheet) : $('#house-box', sheet)).after(box); }
+      box.innerHTML = `<b>这套房子 ${twin.deal_date} 已经记过一单了，不能重复记账。</b><div class="small">${U.DUP_DAYS} 天内同一套房子只能记一单。要改金额、业务员，请打开原来那一单改；记错了房子就把上面的房子改掉。</div><button type="button" id="dup-open">打开原来那一单</button>`;
+      $('#dup-open', box).onclick = () => { close(); openDeal(twin); };
+    };
+    const checkDup = (listingId) => {
+      if (deal && deal.status !== 'draft' && deal.status !== 'confirming') return setDupLock(null);
+      const probe = { id: deal ? deal.id : undefined, parent_id: null, type: d.type, deal_date: $('#f-date', sheet).value || d.deal_date,
+        listing_id: d.type === '新房' ? null : listingId, title: d.type === '新房' ? ($('#f-title', sheet).value || '') : '' };
+      setDupLock(U.dupDeal(probe, state.deals));
+    };
     const showHouse = () => {
       const isNew = d.type === '新房';
       $('#house-box', sheet).hidden = isNew; $('#title-box', sheet).hidden = !isNew;
-      if (isNew) { $('#f-owner-phones', sheet).innerHTML = ''; return; }
+      if (isNew) { $('#f-owner-phones', sheet).innerHTML = ''; checkDup(null); return; }
+      checkDup(house().listing ? house().listing.id : null);
       $('#f-units', sheet).innerHTML = state.listings.filter((l) => l.community === house().comm && l.status === 'active').map((l) => `<option value="${esc(l.unit)}">`).join('');
       const h = house(), info = $('#f-house-info', sheet), op = $('#f-owner-phones', sheet);
       const ph = h.listing ? (h.listing.owners || []).filter((o) => o.phone) : [];
@@ -767,6 +788,8 @@
     fComm.onchange = () => { fOther.hidden = fComm.value !== '__other'; if (!fOther.hidden) fOther.focus(); showHouse(); preview(); };
     fOther.oninput = fUnit.oninput = () => { showHouse(); };
     sheet.querySelectorAll('[data-type]').forEach((b) => b.addEventListener('click', () => setTimeout(showHouse)));
+    $('#f-date', sheet).addEventListener('change', showHouse);
+    if ($('#f-title', sheet)) $('#f-title', sheet).addEventListener('input', showHouse);
     showHouse();
     if ($('#s-save', sheet)) $('#s-save', sheet).onclick = () => save(true); // 保存后直接进入待确认
     drawIncomes(); preview();
