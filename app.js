@@ -308,10 +308,10 @@
     Object.entries(unconf).forEach(([n, ds]) => ds.forEach(() => add(n, 'confirm')));
     noCust.forEach((d) => { const ok = state.confs.filter((c) => c.deal_id === d.id && c.status === 'ok').map((c) => c.agent_name);
       // 还没确认的客户方会在确认时填，这里只算已经确认过、但客户信息还空着的旧单子；没人确认过的算在“确认”里
-      d.client_agents.filter((n) => ok.includes(n)).forEach((n) => add(n, 'cust')); });
+      (d.cust_owner ? [d.cust_owner] : d.client_agents).filter((n) => ok.includes(n)).forEach((n) => add(n, 'cust')); });
     needInfo.forEach((l) => (l.agents || []).forEach((n) => add(n, 'fill')));
     stale.forEach(({ l }) => (l.agents || []).forEach((n) => add(n, 'stale')));
-    noOwner.filter((l) => !l.needs_info).forEach((l) => (l.agents || []).forEach((n) => add(n, 'owner')));
+    noOwner.filter((l) => !l.needs_info).forEach((l) => (l.owner_by && (l.agents || []).includes(l.owner_by) ? [l.owner_by] : l.agents || []).forEach((n) => add(n, 'owner')));
     // 可能重复：同一套房子录了好几次；同一套房子 90 天内记了好几单
     const byKey = {}; state.listings.forEach((l) => { const k = U.houseKey(l); if (!k.endsWith('|')) (byKey[k] = byKey[k] || []).push(l); });
     const dupL = Object.values(byKey).filter((g) => g.length > 1);
@@ -334,10 +334,10 @@
     const sec = (title, n, hint, body, ok) => `<details class="card todo-sec" ${n ? 'open' : ''}><summary class="row between"><b>${title}</b>${n ? `<span class="todo-n">${n}</span>` : '<span class="pill ok">都好了</span>'}</summary>
       ${n ? `<div class="small muted" style="margin:6px 0">${hint}</div>${body}` : `<div class="small muted" style="margin-top:6px">${ok}</div>`}</details>`;
     const unconfRows = sortNames(Object.keys(t.unconf)).map((n) => { const ds = t.unconf[n]; const old = Math.max(...ds.map((d) => daysAgo(d.updated_at || d.created_at) || 0)); return nameBtn(n, `<b class="num">${ds.length}</b> 单没确认${old >= 2 ? `<span class="small muted">（最久等了 ${old} 天）</span>` : ''}`); }).join('');
-    const custRows = byPerson(t.noCust, (d) => d.client_agents).map(([n, ds]) => `<div class="small" style="margin-top:8px"><b>${esc(n)}</b>（${ds.length} 单）</div>${ds.map((d) => dealBtn(d, d.customer_name ? '缺电话' : '名字、电话都没填')).join('')}`).join('');
+    const custRows = byPerson(t.noCust, (d) => d.cust_owner ? [d.cust_owner] : d.client_agents).map(([n, ds]) => `<div class="small" style="margin-top:8px"><b>${esc(n)}</b>（${ds.length} 单）</div>${ds.map((d) => dealBtn(d, d.customer_name ? '缺电话' : '名字、电话都没填')).join('')}`).join('');
     const needRows = byPerson(t.needInfo, (l) => l.agents && l.agents.length ? l.agents : ['（没有维护人）']).map(([n, ls]) => `<div class="small" style="margin-top:8px"><b>${esc(n)}</b>（${ls.length} 套）</div>${ls.map((l) => lBtn(l, '户型面积还没填')).join('')}`).join('');
     const staleRows = t.stale.slice(0, 30).map(({ l, days }) => lBtn(l, `${days} 天没动静`)).join('') + (t.stale.length > 30 ? `<div class="small muted">还有 ${t.stale.length - 30} 套没列出来</div>` : '');
-    const ownerRows = t.noOwner.slice(0, 30).map((l) => lBtn(l, (l.owners || []).length ? '有房东没留电话' : '没填房东')).join('') + (t.noOwner.length > 30 ? `<div class="small muted">还有 ${t.noOwner.length - 30} 套没列出来</div>` : '');
+    const ownerRows = t.noOwner.slice(0, 30).map((l) => lBtn(l, ((l.owners || []).length ? '有房东没留电话' : '没填房东') + (l.owner_by ? `，轮到 ${esc(l.owner_by)} 补` : ''))).join('') + (t.noOwner.length > 30 ? `<div class="small muted">还有 ${t.noOwner.length - 30} 套没列出来</div>` : '');
     const agentProblems = [...t.locked.map((a) => nameBtn(a.name, '<span class="pill seal">密码输错太多次，锁住了</span>')), ...t.noPw.map((a) => nameBtn(a.name, '还没设个人密码')), ...t.unbound.map((a) => nameBtn(a.name, '还没在手机上登记过'))].join('');
     const settleSum = t.toSettle.reduce((s, d) => s + C.calcDeal(d).net, 0);
     const LBL = { confirm: '单没确认', cust: '单缺客户电话', fill: '套房源要补资料', owner: '套没留房东电话', stale: '套房源 30 天没跟进' };
@@ -354,7 +354,7 @@
       ${perNames.length ? `<div class="stack" style="gap:4px"><button class="btn-primary btn-block" id="nudge-all" style="font-size:19px;min-height:54px">🔔 一起催办（${perNames.length} 人）</button><div class="small muted">点了以后，这些人下次打开业务员页会弹出提醒，写着她自己还差什么。</div></div>` : ''}
       ${sec('按人看', perNames.length, '每个人还有几件事没做。催过以后能看到她有没有打开看。', nudgeRows, '大家手上都没有没做完的事。')}
       ${sec('等业务员确认', t.confirming.length, `${t.confirming.length} 单还在等确认。下面是每个人还有几单没点确认，可以在群里提醒一下。`, unconfRows, '所有发出去的单子都确认完了。')}
-      ${sec('客户信息没填', t.noCust.length, '客户方业务员确认时会填。下面按客户方业务员列出来，同一单有几个人的话谁填都行。', custRows, '每一单的客户名字、电话都有了。')}
+      ${sec('客户信息没填', t.noCust.length, '每一单只安排一个客户方业务员填（大家轮流，谁填得少就轮到谁），TA 确认时必须填。下面按轮到的人列出来。', custRows, '每一单的客户名字、电话都有了。')}
       ${sec('房源待补全', t.needInfo.length, '记账时自动建的房源，只有小区和坐落，等房源维护人补户型、面积。', needRows, '没有要补全的房源。')}
       ${sec('业务员还不能确认', t.locked.length + t.noPw.length + t.unbound.length, '没设密码的要在“业务员”里设一个；锁住的点进去解锁；没登记过的，把业务员链接发给她，让她点自己名字登记一次。', agentProblems, '每个业务员都能正常确认。')}
       ${sec('可能重复', t.dupL.length + t.dupD.length, '同一套房子录了好几次，或者同一套房子 90 天内记了好几单。点开看一下，多出来的删掉（已经锁定的单子要先撤回才能删）。',

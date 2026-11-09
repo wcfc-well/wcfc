@@ -705,3 +705,73 @@ begin
       execute $q$update listing_feedback set author = '石万倩' where author = '石文倩'$q$;
     end if;
 end $$;
+
+-- ---------- 2026-11-09：客户信息、房东电话轮流填（每单 / 每套房只指定一个人，谁填得少就轮到谁） ----------
+alter table deals add column if not exists cust_owner text not null default '';    -- 这一单的客户名字电话由谁填
+alter table listings add column if not exists owner_by text not null default '';   -- 这套房的房东电话由谁填
+-- 从这几个人里挑：到现在为止被安排填写次数最少的那个（客户信息 + 房东电话一起算），一样多就按名单顺序；不会用手机的（自动确认）不安排
+create or replace function pick_filler(names text[]) returns text language sql stable security definer set search_path = public as $$
+  select coalesce((select u.n from unnest(names) with ordinality u(n, i)
+    where not exists (select 1 from agents g where g.name = u.n and g.auto_confirm)
+    order by (select count(*) from deals x where x.cust_owner = u.n) + (select count(*) from listings y where y.owner_by = u.n), u.i
+    limit 1), '')
+$$;
+create or replace function deals_cust_owner() returns trigger language plpgsql as $$
+begin
+  if new.parent_id is not null then new.cust_owner := ''; return new; end if;   -- 补记返点不用填客户
+  if tg_op = 'INSERT' or new.client_agents is distinct from old.client_agents then
+    if new.cust_owner = '' or not (new.cust_owner = any(new.client_agents)) then new.cust_owner := pick_filler(new.client_agents); end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_deals_cust_owner on deals;
+create trigger trg_deals_cust_owner before insert or update on deals for each row execute function deals_cust_owner();
+create or replace function listings_owner_by() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'INSERT' or new.agents is distinct from old.agents then
+    if new.owner_by = '' or not (new.owner_by = any(new.agents)) then new.owner_by := pick_filler(new.agents); end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_listings_owner_by on listings;
+create trigger trg_listings_owner_by before insert or update on listings for each row execute function listings_owner_by();
+-- 以前的单子、房子还没填的，补上由谁填（一条一条排，保证轮流）
+do $$
+declare r record;
+begin
+  for r in select id, client_agents from deals where parent_id is null and cust_owner = ''
+             and length(regexp_replace(coalesce(customer_phone, ''), '\D', '', 'g')) < 7 order by deal_date, id loop
+    update deals set cust_owner = pick_filler(r.client_agents) where id = r.id;
+  end loop;
+  for r in select id, agents from listings where owner_by = '' and status <> 'off'
+             and (jsonb_array_length(owners) = 0 or exists (select 1 from jsonb_array_elements(owners) o
+                  where length(regexp_replace(coalesce(o->>'phone', ''), '\D', '', 'g')) < 7)) order by created_at, id loop
+    update listings set owner_by = pick_filler(r.agents) where id = r.id;
+  end loop;
+end $$;
+-- 确认时：这一单指定了谁填客户信息，就只有 TA 必须填；其他客户方业务员直接确认
+create or replace function aunt_confirm(p_token text, p_deal bigint, p_status text, p_note text, p_cust_name text default null, p_cust_phone text default null) returns void
+language plpgsql security definer set search_path = public as $$
+declare a agents; d deals; cn text; cp text;
+begin
+  select * into a from agents where device_token = p_token and active;
+  if not found then raise exception '请重新登记'; end if;
+  select * into d from deals where id = p_deal for update;
+  if not found or d.status <> 'confirming' then raise exception '这一单现在不能确认'; end if;
+  if not (a.name = any(deal_people(d))) then raise exception '这一单没有您'; end if;
+  perform set_config('app.who', a.name, true);
+  if p_status = 'ok' and d.parent_id is null and (case when d.cust_owner <> '' then a.name = d.cust_owner else a.name = any(d.client_agents) end) then
+    cn := coalesce(nullif(trim(p_cust_name), ''), d.customer_name);
+    cp := coalesce(nullif(trim(p_cust_phone), ''), d.customer_phone);
+    if coalesce(cn, '') = '' then raise exception '这一单的客户信息轮到您填，请先填客户名字'; end if;
+    if length(regexp_replace(coalesce(cp, ''), '\D', '', 'g')) < 7 then raise exception '这一单的客户信息轮到您填，请先填客户电话'; end if;
+    if cn is distinct from d.customer_name or cp is distinct from d.customer_phone then
+      update deals set customer_name = cn, customer_phone = cp where id = p_deal;
+    end if;
+  elsif p_status = 'ok' and a.name = any(d.client_agents) and d.parent_id is null and (nullif(trim(p_cust_name), '') is not null or nullif(trim(p_cust_phone), '') is not null) then
+    -- 不是轮到的人，但顺手填了也收下
+    update deals set customer_name = coalesce(nullif(trim(p_cust_name), ''), customer_name), customer_phone = coalesce(nullif(trim(p_cust_phone), ''), customer_phone) where id = p_deal;
+  end if;
+  insert into confirmations (deal_id, agent_name, status, note, at) values (p_deal, a.name, p_status, coalesce(p_note, ''), now())
+  on conflict (deal_id, agent_name) do update set status = excluded.status, note = excluded.note, at = now();
+end $$;

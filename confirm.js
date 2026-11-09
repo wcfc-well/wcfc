@@ -347,21 +347,26 @@
     const mineOf = (d) => C.calcDeal(d).people[name] || 0;
     const sumOf = (list) => list.reduce((a, x) => a + mineOf(x.deal), 0);
 
-    // 客户信息只存一份：客户方有几位业务员时，谁先确认谁填，填好了别人能看到是谁填的
+    // 客户信息只存一份：客户方有几位业务员时，店里轮流安排一个人填（cust_owner），其他人直接确认
+    const myCust = (d) => !d.parent_id && (d.cust_owner ? d.cust_owner === name : d.client_agents.includes(name));
+    const otherCust = (d) => {
+      const filled = d.customer_name && (d.customer_phone || '').replace(/\D/g, '').length >= 7;
+      return `<div class="card small stack" style="gap:4px">${filled ? `<b>✓ 客户信息${d.customer_by && d.customer_by !== name ? '已由 ' + esc(d.customer_by) + ' 填好' : '已经填好'}</b>` : `<b>这一单的客户信息轮到 ${esc(d.cust_owner)} 填</b><span class="muted">您看一下没问题，直接点“确认无误”就行。</span>`}</div>`;
+    };
     const custTodo = (d) => {
       const filled = d.customer_name && (d.customer_phone || '').replace(/\D/g, '').length >= 7;
       const by = d.customer_by && d.customer_by !== name ? (d.customer_by === '店面' ? '店面' : d.customer_by) : '';
       const when = d.customer_at ? new Date(d.customer_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
       const head = filled
         ? `<b>✓ 客户信息${by ? '已由 ' + esc(by) + ' 填好' : '已经填好'}</b>${when ? `<span class="small muted">${esc(when)}</span>` : ''}<span class="small">看一下没问题，直接点“确认无误”就行。填错了可以在这里改。</span>`
-        : `<b>您是客户方业务员，请补全客户信息（必须填，店里留存）</b><span class="small">客户名字和电话不填，这一单确认不了。</span>`;
+        : `<b>这一单的客户信息轮到您填（必须填，店里留存）</b><span class="small">客户方几位业务员轮流填，谁填得少就轮到谁。客户名字和电话不填，这一单确认不了。</span>`;
       return `<div class="todo-card stack" style="gap:8px">${head}
           <span class="small">客户（名字、电话）</span><div class="oline nodel"><input data-cn="${d.id}" data-orig="${esc(d.customer_name || '')}" value="${esc(d.customer_name || '')}" placeholder="客户名字" aria-label="客户名字"><input data-cp="${d.id}" data-orig="${esc(d.customer_phone || '')}" value="${esc(d.customer_phone || '')}" inputmode="tel" placeholder="手机号" aria-label="客户电话"><button type="button" class="ocall" data-call aria-label="拨打这个电话">📞</button></div></div>`;
     };
     const pendingHTML = pending.map((x) => {
       const d = x.deal, c = x.confirmation;
       return `<div class="stack" style="gap:8px">${d.reopen_count ? `<div class="notice">店面改过这一单${d.reopen_note ? '：' + esc(d.reopen_note) : ''}。请重新看一下，没问题再确认。</div>` : ''}${dealCard(d, name).html}
-        ${d.client_agents.includes(name) && !d.parent_id ? custTodo(d) : ''}
+        ${myCust(d) ? custTodo(d) : d.client_agents.includes(name) && !d.parent_id ? otherCust(d) : ''}
         <button class="btn-primary btn-block" data-ok="${d.id}" style="font-size:20px;min-height:56px">确认无误</button>
         <div class="small muted">有疑问请直接在群里问，没问题再点确认。</div></div>`;
     }).join('<hr style="border:0;border-top:2px dashed var(--line);margin:6px 0">');
@@ -384,8 +389,8 @@
     const phoneOK = (p) => (p || '').replace(/\D/g, '').length >= 7;
     const myLive = allL.filter((x) => x.mine && x.status === 'active');
     const stale = myLive.filter((x) => !x.needs_info && daysSince(lastTouch(x)) >= 30);
-    const noOwner = myLive.filter((x) => !x.needs_info && (!(x.owners || []).length || (x.owners || []).some((o) => !phoneOK(o.phone))));
-    const oldNoCust = deals.filter((x) => !x.deal.parent_id && x.deal.client_agents.includes(name) && x.confirmation && x.confirmation.status === 'ok'
+    const noOwner = myLive.filter((x) => !x.needs_info && (!x.owner_by || x.owner_by === name || !(x.agents || []).includes(x.owner_by)) && (!(x.owners || []).length || (x.owners || []).some((o) => !phoneOK(o.phone))));
+    const oldNoCust = deals.filter((x) => myCust(x.deal) && x.confirmation && x.confirmation.status === 'ok'
       && (!(x.deal.customer_name || '').trim() || !phoneOK(x.deal.customer_phone)));
     todoN = pending.length + toFill.length + stale.length + noOwner.length + oldNoCust.length;
     const lbtn = (x, attr, right) => `<button class="todo-btn" ${attr}="${x.id}"><span>${esc(x.community)} ${esc(x.unit)}</span><span>${right} ›</span></button>`;
@@ -398,9 +403,9 @@
       ${todoN ? '' : '<div class="card" style="font-size:18px">现在没有要做的事 ✓</div>'}
       ${pending.length ? `<h2>请您确认（${pending.length} 单）</h2>${pendingHTML}` : ''}
       ${toFill.length ? block(toFill.length, '套房子', '的资料要您补一下', '店里记账时自动建的，只有小区和坐落。您是房源维护人，请补上户型、面积这些。', toFill.map((x) => lbtn(x, 'data-fill', '去补资料')).join('')) : ''}
-      ${noOwner.length ? block(noOwner.length, '套房子', '没留房东电话', '您是这几套房的维护人，请把房东名字、电话补上。', noOwner.map((x) => lbtn(x, 'data-fill', '去补电话')).join('')) : ''}
+      ${noOwner.length ? block(noOwner.length, '套房子', '没留房东电话', '这几套房的房东电话轮到您补（几位维护人轮流，谁填得少就轮到谁），请把房东名字、电话补上。', noOwner.map((x) => lbtn(x, 'data-fill', '去补电话')).join('')) : ''}
       ${stale.length ? block(stale.length, '套房子', '30 天没跟进了', '您是维护人。问一下房东房子还卖不卖、价格变没变，点进去写一条联系反馈就行。', stale.map((x) => lbtn(x, 'data-ldet', daysSince(lastTouch(x)) + ' 天没动静')).join('')) : ''}
-      ${oldNoCust.length ? block(oldNoCust.length, '单', '还缺客户电话', '您是这几单的客户方业务员，请补上客户名字、电话（店里留存）。', oldNoCust.map((x) => `<div class="small"><b>${esc(x.deal.title)}</b> <span class="muted num">${x.deal.deal_date}</span></div>${custBox(x.deal)}`).join('')) : ''}`;
+      ${oldNoCust.length ? block(oldNoCust.length, '单', '还缺客户电话', '这几单的客户信息轮到您填，请补上客户名字、电话（店里留存）。', oldNoCust.map((x) => `<div class="small"><b>${esc(x.deal.title)}</b> <span class="muted num">${x.deal.deal_date}</span></div>${custBox(x.deal)}`).join('')) : ''}`;
     const stmtHTML = `
       <h1>${esc(name)}，您好</h1>
       ${pending.length ? `<button class="todo-card todo-link" id="go-todo"><div class="todo-head"><span class="todo-num">${pending.length}</span><b>单等您确认，去待办 ›</b></div></button>` : ''}

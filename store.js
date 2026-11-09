@@ -79,6 +79,9 @@
     }
     const clone = (x) => JSON.parse(JSON.stringify(x));
     const deal = (id) => db.deals.find((d) => d.id === id);
+    // 客户信息、房东电话轮流填：挑被安排次数最少的人（和 setup.sql 的 pick_filler 一样）
+    const pickFiller = (names) => { const auto = new Set(db.agents.filter((g) => g.auto_confirm).map((g) => g.name)); const load = (n) => db.deals.filter((x) => x.cust_owner === n).length + db.listings.filter((x) => x.owner_by === n).length; let best = '', bl = Infinity; (names || []).forEach((n) => { if (auto.has(n)) return; const l = load(n); if (l < bl) { best = n; bl = l; } }); return best; };
+    const fixFiller = (row, key, names) => { if (!row[key] || !(names || []).includes(row[key])) row[key] = pickFiller(names); };
     // 房源照片：一套房一张。大图单独存，列表里只带小图
     const setPhoto = (id, photo, thumb) => { db.photos = db.photos || {}; const l = db.listings.find((y) => y.id === id);
       if (photo) { db.photos[id] = photo; if (l) l.photo_thumb = thumb || ''; } else { delete db.photos[id]; if (l) l.photo_thumb = ''; } };
@@ -121,6 +124,7 @@
         const oldL = old ? old.listing_id : null;
         let target;
         if (old) target = Object.assign(old, row); else { target = { ...row, id: ++db.seq, locked_at: null, settlement_id: null }; db.deals.push(target); }
+        if (target.parent_id) target.cust_owner = ''; else fixFiller(target, 'cust_owner', target.client_agents);
         syncListing(oldL); syncListing(target.listing_id, null);
         maybeLock(target); save(); return true;
       },
@@ -178,10 +182,10 @@
         if (!a) return fail('请重新登记');
         const d = deal(dealId);
         if (!d || d.status !== 'confirming') return fail('这一单现在不能确认');
-        if (status === 'ok' && (d.client_agents || []).includes(a.name) && !d.parent_id) {
+        if (status === 'ok' && !d.parent_id && (d.cust_owner ? d.cust_owner === a.name : (d.client_agents || []).includes(a.name))) {
           const cn = (cust && cust.name || '').trim() || d.customer_name || '', cp = (cust && cust.phone || '').trim() || d.customer_phone || '';
-          if (!cn) return fail('您是客户方业务员，请先填客户名字');
-          if (cp.replace(/\D/g, '').length < 7) return fail('您是客户方业务员，请先填客户电话');
+          if (!cn) return fail('这一单的客户信息轮到您填，请先填客户名字');
+          if (cp.replace(/\D/g, '').length < 7) return fail('这一单的客户信息轮到您填，请先填客户电话');
           if (cn !== d.customer_name || cp !== d.customer_phone) { d.customer_name = cn; d.customer_phone = cp; d.customer_by = a.name; d.customer_at = new Date().toISOString(); }
         }
         db.confirmations = db.confirmations.filter((c) => !(c.deal_id === dealId && c.agent_name === a.name));
@@ -198,8 +202,8 @@
         if (dup) return fail(`系统里已经有这套房子了（${dup.community} ${dup.unit}，维护人 ${(dup.agents || []).join('、') || '—'}），不能重复录入`);
         const old = x.id && db.listings.find((y) => y.id === x.id);
         let id = x.id;
-        if (id) Object.assign(old, x);
-        else { id = ++db.seq; db.listings.push({ ...x, id, created_at: x.created_at || new Date().toISOString().slice(0, 10) }); }
+        if (id) { Object.assign(old, x); fixFiller(old, 'owner_by', old.agents); }
+        else { id = ++db.seq; const nl = { ...x, id, created_at: x.created_at || new Date().toISOString().slice(0, 10) }; fixFiller(nl, 'owner_by', nl.agents); db.listings.push(nl); }
         if (ph !== undefined) setPhoto(id, ph, x.photo_thumb);
         save(); return id;
       },
@@ -219,7 +223,8 @@
           const names = db.agents.filter((g) => g.active).map((g) => g.name);
           const ags = (x.agents || []).filter((n) => names.includes(n));
           const nid = ++db.seq, at = new Date().toISOString();
-          db.listings.push({ ...d, id: nid, agents: ags.length ? ags : [a.name], status: 'active', note: x.note || '', note_log: x.note ? [{ by: a.name, at, note: x.note }] : [], created_by: a.name, created_at: at.slice(0, 10), feedback: [] });
+          const nl = { ...d, id: nid, agents: ags.length ? ags : [a.name], status: 'active', note: x.note || '', note_log: x.note ? [{ by: a.name, at, note: x.note }] : [], created_by: a.name, created_at: at.slice(0, 10), feedback: [] };
+          fixFiller(nl, 'owner_by', nl.agents); db.listings.push(nl);
           if ('photo' in x) setPhoto(nid, x.photo, x.photo_thumb);
           save(); return nid;
         }
