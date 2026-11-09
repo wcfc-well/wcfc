@@ -204,7 +204,7 @@
     const phField = Photo.field($('#ph-box'), x.photo_thumb, () => S.auntListingPhoto(x.id));
     $('#back').onclick = () => isNew ? listings() : listingDetail(all.find((y) => y.id === x.id), all);
     const commVal = () => { const v = $('#e-comm-sel').value; return (v === '__other' ? $('#e-comm').value : v).trim(); };
-    const key = (c, u) => (c + '|' + u).replace(/\s/g, '');
+    const key = (c, u) => window.StoreUtil.houseKey({ community: c, unit: u });
     const dup = () => { const k = key(commVal(), $('#e-unit').value); const d = commVal() && $('#e-unit').value.trim() && all.find((y) => y.id !== x.id && key(y.community, y.unit) === k);
       const box = $('#e-dup'); box.hidden = !d; if (d) box.textContent = `系统里已经有这套房子了（维护人 ${(d.agents || []).join('、') || '—'}），不能重复录入`; return !!d; };
     $('#e-comm-sel').onchange = () => { const o = $('#e-comm-sel').value === '__other'; $('#e-comm').hidden = !o; if (o) $('#e-comm').focus(); dup(); };

@@ -18,7 +18,14 @@
     del(k) { try { localStorage.removeItem(k); } catch (e) { /* 忽略 */ } },
   };
   const KEYS = (x) => [x.deal_date, x.type, x.incomes, x.expenses, x.listing_agents, x.client_agents, x.owner_name || ''];  // 客户名字电话不影响分钱，改了不用重新确认
-  const houseKey = (x) => ((x.community || '') + '|' + (x.unit || '')).replace(/\s/g, '');
+  // 同一套房子的判断：小区去掉空格；坐落里的 幢/栋/号/单元/室/横杠/空格 都当成分隔符。“7幢2单元601” 和 “7-2-601” 算同一套
+  const unitKey = (u) => String(u || '').replace(/[\s幢栋号单元室\-—–_/、.，,#]+/g, '-').replace(/^-+|-+$/g, '');
+  const houseKey = (x) => String(x.community || '').replace(/\s/g, '') + '|' + unitKey(x.unit);
+  // 同一套房子、同一种类型，90 天内只能记一单（防止重复记账多发钱）；新房按楼盘房号比
+  const DUP_DAYS = 90;
+  const dealKey = (d) => d.parent_id ? null : d.listing_id ? 'L' + d.listing_id + '|' + d.type : d.type === '新房' && (d.title || '').trim() ? 'T' + String(d.title).replace(/[\s幢栋号单元室\-—–_/、.，,#]+/g, '') : null;
+  const dupDeal = (d, all) => { const k = dealKey(d); if (!k) return null; const t0 = new Date(d.deal_date).getTime();
+    return all.find((y) => y.id !== d.id && dealKey(y) === k && Math.abs(new Date(y.deal_date).getTime() - t0) < DUP_DAYS * 86400000) || null; };
   const sameContent = (a, b) => JSON.stringify(KEYS(a)) === JSON.stringify(KEYS(b));
 
   // ---------- 演示模式 ----------
@@ -107,6 +114,7 @@
       async saveDeal(d, send) {
         const old = d.id ? deal(d.id) : null;
         if (old && old.status === 'locked') return fail('这一单大家已经确认锁定，不能再改');
+        if (!old) { const tw = dupDeal(d, db.deals); if (tw) return fail(`这套房子 ${DUP_DAYS} 天内已经记过一单（${tw.deal_date}），不能重复记账`); }
         const status = send ? 'confirming' : 'draft';
         if (old && (!sameContent(old, d) || status === 'draft')) db.confirmations = db.confirmations.filter((c) => c.deal_id !== old.id);
         const row = { deal_date: d.deal_date, type: d.type, title: d.title, owner_name: d.owner_name || '', partner: d.partner || '', customer_phone: d.customer_phone || '', customer_name: d.customer_name || '', incomes: clone(d.incomes), expenses: clone(d.expenses), listing_agents: d.listing_agents.slice(), client_agents: d.client_agents.slice(), note: d.note, status, listing_id: d.listing_id || null, parent_id: d.parent_id || null, deal_price: d.deal_price == null || d.deal_price === '' ? null : Number(d.deal_price) };
@@ -336,7 +344,7 @@
     throw new Error('supabase not loaded');
   }
   window.Store = CLOUD ? cloudStore() : demoStore();
-  window.StoreUtil = { involves, participants, people, STAFF };
+  window.StoreUtil = { involves, participants, people, STAFF, houseKey, unitKey, dealKey, dupDeal, DUP_DAYS };
 
   // 房源照片：手机选一张，压缩成大图（最长 1280）和小图（最长 320），都是 jpg
   function resizeTo(img, max, q) {

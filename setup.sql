@@ -640,3 +640,37 @@ begin
 end $$;
 revoke all on function aunt_push_subscribe(text, text, text, text) from public;
 grant execute on function aunt_push_subscribe(text, text, text, text) to anon, authenticated;
+
+-- ---------- 2026-11-09：防重复（同一套房子录好几次、同一单记好几次会多发钱） ----------
+-- 同一套房子：小区去掉空格；坐落里的 幢/栋/号/单元/室/横杠/空格 都当成分隔符（“7幢2单元601” 和 “7-2-601” 算同一套）
+create or replace function house_key(c text, u text) returns text language sql immutable as $$
+  select regexp_replace(coalesce(c, ''), '\s', '', 'g') || '|' ||
+         regexp_replace(regexp_replace(coalesce(u, ''), '[\s幢栋号单元室\-—–_/、.，,#]+', '-', 'g'), '^-+|-+$', '', 'g');
+$$;
+-- 换成新的判断方法。已经有重复的话先不加（不让整段报错），到店面“待办 → 可能重复”里删掉多的再跑一次
+do $$ begin
+  create unique index if not exists listings_same_house2 on listings (house_key(community, unit));
+  drop index if exists listings_same_house;
+exception when unique_violation then
+  raise notice '房源里已经有重复的，先在待办里删掉多的，再跑一次这段';
+end $$;
+
+-- 同一套房子、同一种类型，90 天内只能记一单（新房按楼盘房号比）；补记的返点不算
+create or replace function deals_no_dup() returns trigger language plpgsql security definer set search_path = public as $$
+declare o deals;
+begin
+  if new.parent_id is not null then return new; end if;
+  if tg_op = 'UPDATE' and new.listing_id is not distinct from old.listing_id and new.type = old.type and new.deal_date = old.deal_date and new.title = old.title then return new; end if;
+  select * into o from deals x where x.id <> coalesce(new.id, -1) and x.parent_id is null and x.type = new.type
+    and abs(x.deal_date - new.deal_date) < 90
+    and ((new.listing_id is not null and x.listing_id = new.listing_id)
+      or (new.type = '新房' and new.listing_id is null and x.listing_id is null and trim(new.title) <> ''
+          and regexp_replace(x.title, '[\s幢栋号单元室\-—–_/、.，,#]+', '', 'g') = regexp_replace(new.title, '[\s幢栋号单元室\-—–_/、.，,#]+', '', 'g')))
+    order by x.deal_date desc limit 1;
+  if found then
+    raise exception '这套房子 90 天内已经记过一单（%），不能重复记账。要改请打开原来那一单改', o.deal_date;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_deals_no_dup on deals;
+create trigger trg_deals_no_dup before insert on deals for each row execute function deals_no_dup();

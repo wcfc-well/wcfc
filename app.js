@@ -312,10 +312,17 @@
     needInfo.forEach((l) => (l.agents || []).forEach((n) => add(n, 'fill')));
     stale.forEach(({ l }) => (l.agents || []).forEach((n) => add(n, 'stale')));
     noOwner.filter((l) => !l.needs_info).forEach((l) => (l.agents || []).forEach((n) => add(n, 'owner')));
-    return { unconf, confirming, noCust, needInfo, stale, noOwner, noPw, locked, unbound, drafts, toSettle, per };
+    // 可能重复：同一套房子录了好几次；同一套房子 90 天内记了好几单
+    const byKey = {}; state.listings.forEach((l) => { const k = U.houseKey(l); if (!k.endsWith('|')) (byKey[k] = byKey[k] || []).push(l); });
+    const dupL = Object.values(byKey).filter((g) => g.length > 1);
+    const seen = new Set(), dupD = [];
+    state.deals.slice().sort((x, y) => x.deal_date.localeCompare(y.deal_date)).forEach((d) => {
+      if (seen.has(d.id)) return; const g = state.deals.filter((y) => y.id === d.id || (U.dealKey(y) && U.dealKey(y) === U.dealKey(d) && Math.abs(new Date(y.deal_date) - new Date(d.deal_date)) < U.DUP_DAYS * 86400000));
+      if (g.length > 1) { g.forEach((y) => seen.add(y.id)); dupD.push(g); } });
+    return { unconf, confirming, noCust, needInfo, stale, noOwner, noPw, locked, unbound, drafts, toSettle, per, dupL, dupD };
   }
   function todoCount() {
-    try { const t = todoData(); return t.confirming.length + t.noCust.length + t.needInfo.length + t.drafts.length + t.locked.length; } catch (e) { return 0; }
+    try { const t = todoData(); return t.confirming.length + t.noCust.length + t.needInfo.length + t.drafts.length + t.locked.length + t.dupL.length + t.dupD.length; } catch (e) { return 0; }
   }
   function renderTodo() {
     const t = todoData();
@@ -350,6 +357,9 @@
       ${sec('客户信息没填', t.noCust.length, '客户方业务员确认时会填。下面按客户方业务员列出来，同一单有几个人的话谁填都行。', custRows, '每一单的客户名字、电话都有了。')}
       ${sec('房源待补全', t.needInfo.length, '记账时自动建的房源，只有小区和坐落，等房源维护人补户型、面积。', needRows, '没有要补全的房源。')}
       ${sec('业务员还不能确认', t.locked.length + t.noPw.length + t.unbound.length, '没设密码的要在“业务员”里设一个；锁住的点进去解锁；没登记过的，把业务员链接发给她，让她点自己名字登记一次。', agentProblems, '每个业务员都能正常确认。')}
+      ${sec('可能重复', t.dupL.length + t.dupD.length, '同一套房子录了好几次，或者同一套房子 90 天内记了好几单。点开看一下，多出来的删掉（已经锁定的单子要先撤回才能删）。',
+        t.dupD.map((g) => `<div class="small" style="margin-top:8px"><b>同一套房子记了 ${g.length} 单</b></div>${g.map((d) => dealBtn(d, d.settlement_id ? '已结算' : d.status === 'locked' ? '已确认' : d.status === 'draft' ? '草稿' : '等确认')).join('')}`).join('')
+        + t.dupL.map((g) => `<div class="small" style="margin-top:8px"><b>同一套房子录了 ${g.length} 次</b></div>${g.map((l) => lBtn(l, '')).join('')}`).join(''), '没有发现重复的房源和单子。')}
       ${sec('草稿没发出去', t.drafts.length, '记了但还没发给业务员确认的单子。', t.drafts.map((d) => dealBtn(d, '草稿')).join(''), '没有草稿。')}
       ${sec('在售在租，30 天没人跟进', t.stale.length, '30 天里没改过、没写备注、没写联系反馈。可以问一下维护人房子还在不在卖。', staleRows, '在售在租的房源最近都有人跟。')}
       ${sec('房东电话没留', t.noOwner.length, '在售在租的房源里，没填房东或者房东没留电话的。', ownerRows, '房东电话都有。')}
@@ -501,7 +511,9 @@
       if (!d.deal_date) return toast('请选到账日期');
       if (!d.incomes.length || d.incomes.some((i) => !i.amount)) return toast('请勾选到账的返点，并填上金额');
       if (!d.listing_agents.length && !d.client_agents.length) return toast('原单没有选这一方的业务员，没法分');
-      await run(() => S.saveDeal(d, true)); close(); toast('已保存，打开这一笔可以生成结算单发到群里'); await reload();
+      const b = $('#a-save', sheet); if (b.disabled) return; b.disabled = true;  // 防止连点记成两笔
+      try { await run(() => S.saveDeal(d, true)); } catch (e) { b.disabled = false; return; }
+      close(); toast('已保存，打开这一笔可以生成结算单发到群里'); await reload();
     };
   }
 
@@ -694,7 +706,9 @@
       const fresh = state.deals.find((x) => x.id === deal.id); if (fresh) openDeal(fresh);
     });
     if ($('#s-del', sheet)) twice($('#s-del', sheet), '再点一次删除', async () => { await run(() => S.deleteDeal(d.id)); close(); toast('已删除'); await reload(); });
+    let saving = false;  // 防止连点两下记成两单
     const save = async (send) => {
+      if (saving) return;
       collect();
       if (!d.deal_date) return toast('请选日期');
       if (!d.incomes.length) return toast('请至少勾选一项收入');
@@ -710,7 +724,11 @@
           d.listing_id = await run(() => S.saveListing(nl));
         }
       }
-      await run(() => S.saveDeal(d, send)); close(); toast(deal ? '已保存' : '已保存，打开这一单可以生成结算单发到群里'); await reload();
+      const twin = U.dupDeal(d, state.deals);
+      if (twin) return toast(`这套房子 ${U.DUP_DAYS} 天内已经记过一单（${twin.deal_date}），不能重复记账。要改请打开原来那一单改。`);
+      saving = true; sheet.querySelectorAll('.sheet-actions button').forEach((b) => { b.disabled = true; });
+      try { await run(() => S.saveDeal(d, send)); } catch (e) { saving = false; sheet.querySelectorAll('.sheet-actions button').forEach((b) => { b.disabled = false; }); return; }
+      close(); toast(deal ? '已保存' : '已保存，打开这一单可以生成结算单发到群里'); await reload();
     };
     // 房子：只填小区 + 坐落。房源里有这套就自动关联；没有的话，保存时自动新建一条房源（详细信息以后到房源里补）
     const cur = state.listings.find((l) => l.id === d.listing_id);
@@ -1036,7 +1054,7 @@
   const fmtTime = (t) => { if (!t) return ''; const d = new Date(t); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
   const feedbackHTML = (fb) => (fb && fb.length) ? `<div class="fb-list">${fb.slice().reverse().map((x) => `<div class="fb"><div class="small muted"><b>${esc(x.author)}</b>　${fmtTime(x.created_at)}</div><div>${esc(x.content)}</div></div>`).join('')}</div>` : '<div class="small muted">还没有反馈</div>';
   const L_STATUS = { active: (k) => k === '出租' ? '在租' : '在售', done: (k) => k === '出租' ? '已租' : '已售', off: () => '下架' };
-  const houseKey = (x) => ((x.community || '') + '|' + (x.unit || '')).replace(/\s/g, '');
+  const houseKey = U.houseKey;
   const dealPrice = (x) => { const d = state.deals.filter((y) => y.listing_id === x.id && !y.parent_id && y.deal_price != null).sort((a, b) => b.deal_date.localeCompare(a.deal_date))[0]; return d ? d.deal_price : null; };
   const soldText = (x, v) => `成交 ${Number(v).toLocaleString()} ${x.kind === '出租' ? '元/月' : '万'}`;
   const priceText = (x) => x.price == null || x.price === '' ? '价格未填' : x.kind === '出租' ? `${Number(x.price).toLocaleString()} 元/月` : `${Number(x.price).toLocaleString()} 万`;
@@ -1227,7 +1245,9 @@
       const t = $('#fb-text', sheet).value.trim(); if (!t) return toast('请先写反馈内容');
       await run(() => S.addFeedback(x.id, '周姐', t)); await loadAll(); close(); openListing(state.listings.find((y) => y.id === x.id)); toast('反馈已添加');
     };
+    let saving = false;  // 防止连点两下录成两套
     const save = async () => {
+      if (saving) return false;
       collect();
       if (showDup()) { toast('这套房子已经录过了，不能重复录入'); $('#l-dup', sheet).scrollIntoView({ block: 'center' }); return false; }
       if (!x.community) { toast('请选小区（不在列表里就选第一个“其他”，自己填）'); return false; }
@@ -1241,7 +1261,9 @@
         if (d && (cn !== (d.customer_name || '') || cp !== (d.customer_phone || ''))) await run(() => S.setCustomer(d.id, cn, cp));
       }
       const pc = phField.changed(); if (pc !== undefined) { x.photo = pc ? pc.photo : ''; x.photo_thumb = pc ? pc.photo_thumb : ''; }
-      await run(() => S.saveListing(x)); await loadAll(); return true;
+      saving = true;
+      try { await run(() => S.saveListing(x)); } finally { saving = false; }
+      await loadAll(); return true;
     };
     $('#l-cancel', sheet).onclick = close;
     $('#l-save', sheet).onclick = async () => { if (await save()) { close(); renderListings(); toast('已保存'); } };
