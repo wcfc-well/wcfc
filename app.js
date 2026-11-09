@@ -91,7 +91,7 @@
   // ---------- 分账明细（编辑页和单张结算单共用） ----------
   const itemName = (i) => i.type + (i.bank ? `（${i.bank}）` : '') + (i.person ? `（${i.person}）` : '') + (i.memo ? `（${i.memo}）` : '') + (i.paid_by ? `（${i.paid_by}垫付）` : '');
   // 介绍费写介绍人名字；维护费写备注（例如请吃饭）
-  const EXTRA_FIELD = { '房东介绍费': 'person', '客户介绍费': 'person', '房东维护费': 'memo', '客户维护费': 'memo' };
+  const EXTRA_FIELD = { '会计费': 'memo', '房东介绍费': 'person', '客户介绍费': 'person', '房东维护费': 'memo', '客户维护费': 'memo' };
   const MULTI = ['客户维护费', '房东维护费'];
   const reimbHTML = (r) => r.reimbTotal ? `<div class="bd-group"><span class="bd-title">业务员垫付的钱（结算时还给 TA）</span>
         ${Object.entries(r.reimb).map(([n, v]) => `<span>${esc(n)}</span><span class="num">+${f(v)}</span>`).join('')}
@@ -519,7 +519,7 @@
 
   function openDeal(deal, prefill) {
     if (deal && deal.parent_id) { const par = state.deals.find((x) => x.id === deal.parent_id); if (par) return openAddon(par, deal); }
-    const d = deal ? JSON.parse(JSON.stringify(deal)) : { deal_date: today(), type: '二手买卖', title: '', owner_name: '', customer_name: '', incomes: [], expenses: [], listing_agents: [], client_agents: [], note: '', ...(prefill || {}) };
+    const d = deal ? JSON.parse(JSON.stringify(deal)) : { deal_date: today(), type: '二手买卖', title: '', owner_name: '', customer_name: '', incomes: [], expenses: [{ type: '会计费', amount: C.ACCOUNTANT_FEE, memo: '曹会计' }], listing_agents: [], client_agents: [], note: '', ...(prefill || {}) };
     const locked = deal && deal.status === 'locked';
     const p = deal ? progress(deal) : null;
     const names = state.agents.filter((a) => a.active || d.listing_agents.includes(a.name) || d.client_agents.includes(a.name)).map((a) => a.name);

@@ -82,9 +82,10 @@ begin
     end if;
   end if;
 end $$;
-
+-- 2026-11-09：石文倩 改名 石万倩，先改业务员名单（单子里的名字在文件最后一起改）
+update agents set name = '石万倩' where name = '石文倩' and not exists (select 1 from agents where name = '石万倩');
 insert into agents (name, sort) values
-  ('石文倩',0),('安丽霞',1),('李秀英',2),('邹增花',3),('王海燕',4),('赵春芹',5),('马美景',6),
+  ('石万倩',0),('安丽霞',1),('李秀英',2),('邹增花',3),('王海燕',4),('赵春芹',5),('马美景',6),
   ('张建华',7),('高梅',8),('吕绪红',9),('杨业沙',10),('朱文虎',11),('翁星宇',12)
 on conflict (name) do nothing;
 
@@ -674,3 +675,33 @@ begin
 end $$;
 drop trigger if exists trg_deals_no_dup on deals;
 create trigger trg_deals_no_dup before insert on deals for each row execute function deals_no_dup();
+
+-- 2026-11-09：石文倩 改名 石万倩（名字写错了）。所有地方一起改：业务员、单子、确认记录、房源、反馈。
+-- 改名时临时关掉 deals 上的触发器（已锁定的单子平时不让改），改完马上打开。
+do $$
+begin
+    alter table deals disable trigger user;
+    update deals set listing_agents = array_replace(listing_agents, '石文倩', '石万倩'),
+                     client_agents = array_replace(client_agents, '石文倩', '石万倩'),
+                     expenses = replace(expenses::text, '"石文倩"', '"石万倩"')::jsonb
+      where '石文倩' = any(listing_agents) or '石文倩' = any(client_agents) or expenses::text like '%"石文倩"%';
+    update deals set customer_by = '石万倩' where customer_by = '石文倩';
+    alter table confirmations disable trigger user;
+    update confirmations set agent_name = '石万倩' where agent_name = '石文倩';
+    update nudges set agent_name = '石万倩' where agent_name = '石文倩';
+    update push_subs set agent_name = '石万倩' where agent_name = '石文倩';
+    alter table confirmations enable trigger user;
+    alter table deals enable trigger user;
+    if to_regclass('public.listings') is not null then
+      execute $q$update listings set agents = array_replace(agents, '石文倩', '石万倩'),
+        note_log = replace(note_log::text, '"石文倩"', '"石万倩"')::jsonb,
+        note_by = case when note_by = '石文倩' then '石万倩' else note_by end,
+        created_by = case when created_by = '石文倩' then '石万倩' else created_by end,
+        updated_by = case when updated_by = '石文倩' then '石万倩' else updated_by end,
+        filled_by = case when filled_by = '石文倩' then '石万倩' else filled_by end
+        where '石文倩' = any(agents) or note_log::text like '%石文倩%' or '石文倩' in (note_by, created_by, updated_by, filled_by)$q$;
+    end if;
+    if to_regclass('public.listing_feedback') is not null then
+      execute $q$update listing_feedback set author = '石万倩' where author = '石文倩'$q$;
+    end if;
+end $$;

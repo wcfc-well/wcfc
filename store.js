@@ -5,7 +5,7 @@
   const CLOUD = !!(cfg.supabaseUrl && cfg.supabaseAnonKey && window.supabase);
   const TOKEN_KEY = 'ledger_aunt_token';
 
-  const STAFF = ['石文倩', '安丽霞', '李秀英', '邹增花', '王海燕', '赵春芹', '马美景', '张建华', '高梅', '吕绪红', '杨业沙', '朱文虎', '翁星宇'];
+  const STAFF = ['石万倩', '安丽霞', '李秀英', '邹增花', '王海燕', '赵春芹', '马美景', '张建华', '高梅', '吕绪红', '杨业沙', '朱文虎', '翁星宇'];
 
   // 这一单要确认的人（新房没有房源方）
   const people = (d) => [...new Set([...(d.type === '新房' || d.type === '合作' ? [] : d.listing_agents || []), ...(d.client_agents || [])])];
@@ -44,14 +44,14 @@
           { id: 1, deal_date: '2026-09-12', type: '二手买卖', title: '幸福小区 3-502', owner_name: '刘先生', customer_name: '陈女士', incomes: [{ type: '卖房房东佣金', amount: 60000 }, { type: '卖房客户佣金', amount: 40000 }], expenses: [{ type: '客户介绍费', amount: 10000, person: '老孙' }], listing_agents: ['吕绪红', '王海燕'], client_agents: ['李秀英'], note: '', status: 'locked', locked_at: '2026-09-14T10:00:00Z', settlement_id: 1 },
           { id: 2, deal_date: '2026-10-03', type: '租房', title: '阳光花园 8-201 出租', owner_name: '赵阿姨', customer_name: '小吴', incomes: [{ type: '租房佣金', amount: 3000 }], expenses: [], listing_agents: ['高梅'], client_agents: ['马美景', '翁星宇'], note: '', status: 'locked', locked_at: '2026-10-05T10:00:00Z', settlement_id: null },
           { id: 3, deal_date: '2026-10-20', type: '新房', title: '滨江新城 12 号楼', owner_name: '', customer_name: '黄先生', incomes: [{ type: '开发商佣金', amount: 30000 }], expenses: [{ type: '客户返点', amount: 2000 }], listing_agents: [], client_agents: ['邹增花', '李秀英'], note: '', status: 'confirming', locked_at: null, settlement_id: null },
-          { id: 4, deal_date: '2026-11-02', type: '二手买卖', title: '亭南新村 5幢1单元301', listing_id: 203, owner_name: '郑先生', customer_name: '何女士', incomes: [{ type: '卖房房东佣金', amount: 25000 }, { type: '卖房客户佣金', amount: 25000 }, { type: '银行返点', amount: 3000, bank: '农行' }], expenses: [{ type: '房东介绍费', amount: 2000, person: '老周' }, { type: '客户维护费', amount: 500, person: '小钱' }], listing_agents: ['石文倩'], client_agents: ['安丽霞', '赵春芹'], note: '', status: 'confirming', locked_at: null, settlement_id: null },
+          { id: 4, deal_date: '2026-11-02', type: '二手买卖', title: '亭南新村 5幢1单元301', listing_id: 203, owner_name: '郑先生', customer_name: '何女士', incomes: [{ type: '卖房房东佣金', amount: 25000 }, { type: '卖房客户佣金', amount: 25000 }, { type: '银行返点', amount: 3000, bank: '农行' }], expenses: [{ type: '房东介绍费', amount: 2000, person: '老周' }, { type: '客户维护费', amount: 500, person: '小钱' }], listing_agents: ['石万倩'], client_agents: ['安丽霞', '赵春芹'], note: '', status: 'confirming', locked_at: null, settlement_id: null },
           { id: 5, deal_date: '2026-11-05', type: '租房', title: '春晖苑 2-1203 出租', owner_name: '冯女士', customer_name: '小许', incomes: [{ type: '租房佣金', amount: 4500 }], expenses: [], listing_agents: ['张建华'], client_agents: ['杨业沙'], note: '', status: 'confirming', locked_at: null, settlement_id: null },
         ],
         confirmations: [
           ...okAll(1, ['吕绪红', '王海燕', '李秀英'], '2026-09-14T10:00:00Z'),
           ...okAll(2, ['高梅', '马美景', '翁星宇'], '2026-10-05T10:00:00Z'),
           ...okAll(3, ['邹增花'], '2026-10-22T10:00:00Z'),
-          ...okAll(4, ['石文倩'], '2026-11-03T10:00:00Z'),
+          ...okAll(4, ['石万倩'], '2026-11-03T10:00:00Z'),
         ],
       };
       save();
@@ -61,7 +61,7 @@
       db.listings = [
         { id: 201, kind: '出售', community: '东亭家园', unit: '7幢2单元601', category: '中户', rooms: 3, halls: 2, elevator: true, layout: '3室2厅', area: 118, decoration: '精装', price: 168, feedback: [{ id: 301, author: '吕绪红', content: '房东说价格可以谈到 160', created_at: '2026-11-01T09:20:00Z' }, { id: 302, author: '王海燕', content: '带客户看过一次，嫌楼层高', created_at: '2026-11-04T14:05:00Z' }], owners: [{ name: '孙先生', phone: '13812345678' }, { name: '孙太太', phone: '13812349999' }], agents: ['吕绪红', '王海燕'], status: 'active', note: '满五唯一，随时看房', note_log: [{ by: '周姐', at: '2026-10-28T10:00:00Z', note: '满五唯一' }, { by: '吕绪红', at: '2026-11-02T16:30:00Z', note: '满五唯一，随时看房' }], created_at: '2026-10-28' },
         { id: 202, kind: '出租', community: '青苑新村三区', unit: '3幢1102', category: '小户', rooms: 2, halls: 1, elevator: true, layout: '2室1厅', area: 86, decoration: '简装', price: 2600, owners: [{ name: '钱阿姨', phone: '13987654321' }], agents: ['高梅'], status: 'active', note: '押一付三，可养宠物', note_log: [{ by: '高梅', at: '2026-11-02T11:00:00Z', note: '押一付三，可养宠物' }], created_at: '2026-11-02' },
-        { id: 203, kind: '出售', community: '亭南新村', unit: '5幢1单元301', category: '小户带阁楼', rooms: 2, halls: 1, elevator: false, layout: '2室1厅', area: 72, decoration: '毛坯', price: 95, owners: [{ name: '郑先生', phone: '13700001111' }], agents: ['石文倩'], status: 'done', note: '', created_at: '2026-09-15' },
+        { id: 203, kind: '出售', community: '亭南新村', unit: '5幢1单元301', category: '小户带阁楼', rooms: 2, halls: 1, elevator: false, layout: '2室1厅', area: 72, decoration: '毛坯', price: 95, owners: [{ name: '郑先生', phone: '13700001111' }], agents: ['石万倩'], status: 'done', note: '', created_at: '2026-09-15' },
         { id: 204, kind: '出租', community: '唯亭苑', unit: '18号临街门面', category: '商铺', rooms: null, halls: null, elevator: false, layout: '', area: 45, decoration: '简装', price: 6000, owners: [{ name: '冯老板', phone: '13600002222' }], agents: ['张建华'], status: 'active', note: '可做餐饮', note_log: [{ by: '周姐', at: '2026-11-05T09:30:00Z', note: '可做餐饮' }], created_at: '2026-11-05' },
       ];
       save();

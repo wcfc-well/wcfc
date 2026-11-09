@@ -12,14 +12,16 @@
 
 (function (root) {
   const INCOME_TYPES = ['卖房房东佣金', '卖房客户佣金', '租房佣金', '开发商佣金', '银行返点', '装修返点', '垫资返点', '其他收入'];
-  const EXPENSE_TYPES = ['客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'];
+  const EXPENSE_TYPES = ['会计费', '客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'];
   // 每种房屋类型的支出：新房没有房东的两项
   const EXPENSE_BY_TYPE = {
-    '二手买卖': ['客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
-    '租房': ['客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
-    '新房': ['客户介绍费', '客户维护费', '客户返点', '税费', '其他支出'],
-    '合作': ['客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
+    '二手买卖': ['会计费', '客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
+    '租房': ['会计费', '客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
+    '新房': ['会计费', '客户介绍费', '客户维护费', '客户返点', '税费', '其他支出'],
+    '合作': ['会计费', '客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
   };
+  // 曹会计每一单固定拿 500 元，当成本扣（新记的单子自动勾上，2026-11-09）
+  const ACCOUNTANT_FEE = 500;
   const MAINT_RATE = { '二手买卖': 10, '租房': 10, '新房': 0, '合作': 0 };
   // 只有佣金扣店面维护成本；银行返点、装修返点、垫资返点、其他收入都不扣
   const COMMISSION_TYPES = ['卖房房东佣金', '卖房客户佣金', '租房佣金', '开发商佣金', '合作总佣金'];
@@ -135,6 +137,6 @@
   }
   // fields：要搜的几段文字；query：用空格隔开的几个词，每个词都要在某一段里找到
   const fuzzy = (fields, query) => String(query || '').trim().split(/\s+/).filter(Boolean).every((w) => fields.some((f) => fuzzyOne(f, w)));
-  const api = { fuzzy, oneSide, RETURN_SIDE, sideOf, COMMISSION_TYPES, INCOME_TYPES, INCOME_BY_TYPE, EXPENSE_TYPES, EXPENSE_BY_TYPE, MAINT_RATE, DEAL_TYPES, STORE, toFen, fmt, calcDeal, calcPeriod };
+  const api = { ACCOUNTANT_FEE, fuzzy, oneSide, RETURN_SIDE, sideOf, COMMISSION_TYPES, INCOME_TYPES, INCOME_BY_TYPE, EXPENSE_TYPES, EXPENSE_BY_TYPE, MAINT_RATE, DEAL_TYPES, STORE, toFen, fmt, calcDeal, calcPeriod };
   if (typeof module !== 'undefined') module.exports = api; else root.Calc = api;
 })(this);
