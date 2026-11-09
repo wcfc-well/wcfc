@@ -326,13 +326,13 @@
           ${Object.entries(r.fixed || {}).map(([n, v]) => `<span class="sub">减：${esc(n)}固定拿</span><span class="num sub">-${C.fmt(v)}</span>`).join('')}
           ${r.isCoop ? `<span class="sub">减：合作中介拿一半</span><span class="num sub">-${C.fmt(r.partnerCut)}</span>` : ''}
           <span class="bd-key">总账</span><span class="num bd-key">${C.fmt(r.net)}</span></div>
-        ${r.manual ? `<div class="bd-group"><span class="bd-title" style="grid-column:1/-1">这一单情况特殊，周姐单独算的（不按 10% 和对半分）</span>
-          ${r.manualNote ? `<span class="sub" style="grid-column:1/-1;white-space:pre-wrap">计算方式：${esc(r.manualNote)}</span>` : ''}
-          <span>我这一单分到</span><span class="num">${C.fmt(r.share[name] || 0)}</span>
-          ${r.reimb[name] ? `<span>加：我先垫付的钱（店里还我）</span><span class="num">+${C.fmt(r.reimb[name])}</span>` : ''}
-          <span class="bd-key">我这一单（疑难单）</span><span class="num bd-key">${C.fmt(mine)}</span></div>` : `
         <div class="bd-group">${d.parent_id ? '<span class="sub" style="grid-column:1/-1">返点不扣店面维护</span>' : r.rate ? `<span>减：店面维护 ${r.rate}%</span><span class="num">-${C.fmt(r.maint)}</span>${r.otherIncome || r.expense ? `<span class="sub" style="grid-column:1/-1">只扣佣金部分：（佣金 ${C.fmt(r.commission)}${r.expense ? ' − 支出 ' + C.fmt(r.expense) : ''}）× ${r.rate}%${r.otherIncome ? '，返点 ' + C.fmt(r.otherIncome) + ' 不扣' : ''}</span>` : ''}` : `<span class="sub" style="grid-column:1/-1">${r.isCoop ? '合作单不扣店面维护' : '新房不扣店面维护'}</span>`}
           <span class="bd-key">纯利润</span><span class="num bd-key">${C.fmt(r.rest)}</span></div>
+        ${r.manual ? `<div class="bd-group"><span class="bd-title" style="grid-column:1/-1">这一单情况特殊：纯利润不按比例分，周姐单独算每个人拿多少</span>
+          ${r.manualNote ? `<span class="sub" style="grid-column:1/-1;white-space:pre-wrap">计算方式：${esc(r.manualNote)}</span>` : ''}
+          ${name in (r.fixed || {}) ? `<span>我固定拿</span><span class="num">${C.fmt(r.fixed[name])}</span>` : `<span>我这一单分到</span><span class="num">${C.fmt(r.share[name] || 0)}</span>`}
+          ${r.reimb[name] ? `<span>加：我先垫付的钱（店里还我）</span><span class="num">+${C.fmt(r.reimb[name])}</span>` : ''}
+          <span class="bd-key">我这一单（疑难单）</span><span class="num bd-key">${C.fmt(mine)}</span></div>` : `
         <div class="bd-group">
           ${d.type !== '新房' && d.listing_agents.includes(name) ? `<span>房源方的业务员一半${partners(d.listing_agents)}${r.returns.listing.length ? '（含' + r.returns.listing.map((x) => x.type).join('、') + '）' : ''}</span><span class="num">${C.fmt(r.listingBlock - r.listing.store)}</span>` : ''}
           ${d.client_agents.includes(name) ? `<span>${r.isCoop ? '我们这一半里业务员的一半' : '客户方的业务员一半'}${partners(d.client_agents)}${r.returns.client.length ? '（含' + r.returns.client.map((x) => x.type).join('、') + '）' : ''}</span><span class="num">${C.fmt(r.clientBlock - r.client.store)}</span>` : ''}
