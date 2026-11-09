@@ -91,7 +91,7 @@
   // ---------- 分账明细（编辑页和单张结算单共用） ----------
   const itemName = (i) => i.type + (i.bank ? `（${i.bank}）` : '') + (i.person ? `（${i.person}）` : '') + (i.memo ? `（${i.memo}）` : '') + (i.paid_by ? `（${i.paid_by}垫付）` : '');
   // 介绍费写介绍人名字；维护费写备注（例如请吃饭）
-  const EXTRA_FIELD = { '会计费': 'memo', '房东介绍费': 'person', '客户介绍费': 'person', '房东维护费': 'memo', '客户维护费': 'memo' };
+  const EXTRA_FIELD = { '房东介绍费': 'person', '客户介绍费': 'person', '房东维护费': 'memo', '客户维护费': 'memo' };
   const MULTI = ['客户维护费', '房东维护费'];
   const reimbHTML = (r) => r.reimbTotal ? `<div class="bd-group"><span class="bd-title">业务员垫付的钱（结算时还给 TA）</span>
         ${Object.entries(r.reimb).map(([n, v]) => `<span>${esc(n)}</span><span class="num">+${f(v)}</span>`).join('')}
@@ -101,6 +101,7 @@
     const r = C.calcDeal(d);
     const lines = (items, minus) => items.map((i) => `<span class="sub">${minus ? '减：' : ''}${esc(itemName(i))}</span><span class="num sub">${minus ? '-' : ''}${f(C.toFen(i.amount))}</span>`).join('');
     const retName = (x) => x.type + (x.bank ? `（${x.bank}）` : '');
+    const noFx = (arr) => (arr || []).filter((n) => !(n in r.fixed));  // 固定拿钱的人不参加平分
     const manualPart = r.manual ? `<div class="bd-group"><span class="bd-title">二、疑难单：周姐单独算</span>
         <span class="sub" style="grid-column:1/-1">这一单不按 10% 维护和对半分，每个人拿多少是周姐算好填的。</span>
         ${Object.entries(r.share).map(([n, v]) => `<span>${esc(n)}</span><span class="num">${f(v)}</span>`).join('') || '<span class="muted">还没填</span><span></span>'}
@@ -117,7 +118,7 @@
     return `<div class="bd">
       <div class="bd-group"><span class="bd-title">一、总账</span>
         ${lines(d.incomes)}<span>收入合计</span><span class="num">${f(r.income)}</span>
-        ${lines(d.expenses, true)}<span>支出合计</span><span class="num">-${f(r.expense)}</span>
+        ${lines(d.expenses, true)}${Object.entries(r.fixed).map(([n, v]) => `<span class="sub">减：${esc(n)}固定拿（选了 TA 就自动扣）</span><span class="num sub">-${f(v)}</span>`).join('')}<span>支出合计</span><span class="num">-${f(r.expense)}</span>
         ${r.isCoop ? `<span>减：合作中介拿一半${d.partner ? '（' + esc(d.partner) + '）' : ''}</span><span class="num">-${f(r.partnerCut)}</span>` : ''}
         <span class="bd-key">总账（${r.isCoop ? '我们这一半 − 支出' : '收入 − 支出'}）</span><span class="num bd-key">${f(r.net)}</span></div>
       ${r.manual ? manualPart : `
@@ -126,14 +127,14 @@
         ${d.parent_id ? '<span class="sub" style="grid-column:1/-1">返点不扣店面维护</span>' : r.rate ? `<span>减：店面维护成本 ${r.rate}%</span><span class="num">-${f(r.maint)}</span>${r.otherIncome || r.expense ? `<span class="sub" style="grid-column:1/-1">只扣佣金部分：（佣金 ${f(r.commission)}${r.expense ? ' − 支出 ' + f(r.expense) : ''}）× ${r.rate}%${r.otherIncome ? '，返点等其他收入 ' + f(r.otherIncome) + ' 不扣' : ''}</span>` : ''}` : `<span class="sub" style="grid-column:1/-1">${r.isCoop ? '合作单不扣店面维护成本，总账就是纯利润' : '新房不扣店面维护成本，总账就是纯利润'}</span>`}
         <span class="bd-key">纯利润</span><span class="num bd-key">${f(r.rest)}</span>
         ${r.otherIncome && r.isCoop ? '<span class="sub" style="grid-column:1/-1">合作单的返点和其他收入不给合作中介、不扣 10%，和我们那一半佣金放在一起，店面一半、业务员一半</span>' : ''}${r.otherIncome && !r.isCoop ? `<span class="sub" style="grid-column:1/-1">佣金部分 ${f(r.profit)} 按${d.type === '新房' ? '客户方 100%' : '房源方 20%、客户方 80%'}分；返点不按比例，直接归一方：${d.type === '新房' ? '新房全部归客户方' : '银行、装修返点归客户方，垫资返点归房源方，其他收入看选的哪一方'}</span>` : ''}</div>
-      ${r.isCoop ? block('三、店面和业务员分（合作单不分房源方、客户方）', r.clientBlock, r.client, d.client_agents, r.clientProfit, 100, r.returns.client, '佣金我们这一半 − 支出')
-        : d.type === '新房' ? block('三、客户方（新房，没有房源方）', r.clientBlock, r.client, d.client_agents, r.clientProfit, 100, r.returns.client)
-        : block('三、房源方', r.listingBlock, r.listing, d.listing_agents, r.listingProfit, 20, r.returns.listing) + block('四、客户方', r.clientBlock, r.client, d.client_agents, r.clientProfit, 80, r.returns.client)}`}
+      ${r.isCoop ? block('三、店面和业务员分（合作单不分房源方、客户方）', r.clientBlock, r.client, noFx(d.client_agents), r.clientProfit, 100, r.returns.client, '佣金我们这一半 − 支出')
+        : d.type === '新房' ? block('三、客户方（新房，没有房源方）', r.clientBlock, r.client, noFx(d.client_agents), r.clientProfit, 100, r.returns.client)
+        : block('三、房源方', r.listingBlock, r.listing, noFx(d.listing_agents), r.listingProfit, 20, r.returns.listing) + block('四、客户方', r.clientBlock, r.client, noFx(d.client_agents), r.clientProfit, 80, r.returns.client)}`}
       ${reimbHTML(r)}
       ${forStatement ? '' : `<div class="bd-group bd-store"><span class="bd-title">这一单合计</span>
         <span class="bd-key" style="border:0;padding:0">店面</span><span class="num bd-key" style="border:0;padding:0">${f(r.store)}</span>
-        ${r.reimbTotal ? `<span class="sub">业务员分成</span><span class="num sub">${f(r.net - r.store)}</span><span class="sub">加：还业务员垫付</span><span class="num sub">${f(r.reimbTotal)}</span>` : ''}
-        <span class="bd-key">业务员</span><span class="num bd-key">${f(r.net - r.store + r.reimbTotal)}</span>
+        ${r.reimbTotal || r.fixedTotal ? `<span class="sub">业务员分成</span><span class="num sub">${f(r.net - r.store)}</span>${Object.entries(r.fixed).map(([n, v]) => `<span class="sub">加：${esc(n)}固定拿</span><span class="num sub">${f(v)}</span>`).join('')}${r.reimbTotal ? `<span class="sub">加：还业务员垫付</span><span class="num sub">${f(r.reimbTotal)}</span>` : ''}` : ''}
+        <span class="bd-key">业务员</span><span class="num bd-key">${f(r.net - r.store + r.reimbTotal + r.fixedTotal)}</span>
         ${Object.entries(r.people).map(([n, v]) => `<span class="sub">　${esc(n)}</span><span class="num sub">${f(v)}</span>`).join('')}</div>`}
       ${r.warnings.map((w) => `<div class="notice">${esc(w)}</div>`).join('')}
     </div>`;
@@ -525,7 +526,7 @@
 
   function openDeal(deal, prefill) {
     if (deal && deal.parent_id) { const par = state.deals.find((x) => x.id === deal.parent_id); if (par) return openAddon(par, deal); }
-    const d = deal ? JSON.parse(JSON.stringify(deal)) : { deal_date: today(), type: '二手买卖', title: '', owner_name: '', customer_name: '', incomes: [], expenses: [{ type: '会计费', amount: C.ACCOUNTANT_FEE, memo: '曹会计' }], listing_agents: [], client_agents: [], note: '', ...(prefill || {}) };
+    const d = deal ? JSON.parse(JSON.stringify(deal)) : { deal_date: today(), type: '二手买卖', title: '', owner_name: '', customer_name: '', incomes: [], expenses: [], listing_agents: [], client_agents: [], note: '', ...(prefill || {}) };
     const locked = deal && deal.status === 'locked';
     const p = deal ? progress(deal) : null;
     const names = state.agents.filter((a) => a.active || d.listing_agents.includes(a.name) || d.client_agents.includes(a.name)).map((a) => a.name);
@@ -576,6 +577,12 @@
         ${deal && deal.status === 'confirming' ? '<div class="notice">业务员们正在确认这一单。现在改的话，大家要重新确认。</div>' : ''}
         ${deal && deal.status !== 'draft' ? `<div class="card stack" style="gap:6px"><h3>业务员确认情况</h3>
           ${p.who.map((n) => { const c = p.cm[n]; return `<div class="row between"><span>${esc(n)}</span>${c && c.status === 'ok' ? '<span class="pill ok">已确认</span>' : '<span class="pill gray">还没确认</span>'}</div>`; }).join('')}</div>` : ''}
+        <div class="card stack" id="manual-box" style="gap:8px;border:2px solid #e0a800">
+          <label class="row" style="gap:8px;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="m-on" ${d.manual ? 'checked' : ''} ${dis} style="margin-top:4px;width:26px;height:26px;min-height:0;flex:none;padding:0"><span><b>疑难单：我自己算每个人拿多少</b><br><span class="small muted">特殊的单子才勾。不按 10% 和对半分：给下面选的每位业务员填金额，剩下的归店面。确认、结算照常。</span></span></label>
+          <div id="m-body" class="stack" style="gap:8px" ${d.manual ? '' : 'hidden'}>
+            <div id="m-rows" class="stack" style="gap:6px"></div>
+            <label class="field">计算方式和备注（业务员能看到，必须写）<textarea id="m-note" rows="3" placeholder="例如：房东只给了一半佣金，安丽霞多跑了三趟，所以她拿 3000，其余两人各 1000" ${dis}>${esc(d.manual ? d.manual.note || '' : '')}</textarea></label>
+          </div></div>
         <div class="card stack">
           <label class="field">日期<input type="date" id="f-date" value="${d.deal_date}" ${dis}></label>
           <div style="display:flex;flex-direction:column;gap:4px"><span class="small muted">房屋类型</span>
@@ -602,12 +609,6 @@
           <div class="small muted" style="margin-top:6px">介绍费写介绍人名字。维护费一行一个人：选谁垫的钱、写备注（例如请吃饭）和金额，好几个人垫钱就点“＋ 再加一个人”。选了名字的，结算时这笔钱会还给这个人；店里（周姐）付的就选“周姐”。</div></div>
         <div class="card stack" id="listing-box"><h3>房源方业务员（可多选）</h3><div class="chips">${chips('listing_agents')}</div></div>
         <div class="card stack"><h3 id="client-h">客户方业务员（可多选）</h3><div class="chips">${chips('client_agents')}</div></div>
-        <div class="card stack" id="manual-box" style="gap:8px">
-          <label class="row" style="gap:8px;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="m-on" ${d.manual ? 'checked' : ''} ${dis} style="margin-top:4px"><span><b>疑难单：我自己算每个人拿多少</b><br><span class="small muted">不按 10% 和对半分。勾上后，给上面选的每位业务员填金额，剩下的归店面。确认、结算照常。</span></span></label>
-          <div id="m-body" class="stack" style="gap:8px" ${d.manual ? '' : 'hidden'}>
-            <div id="m-rows" class="stack" style="gap:6px"></div>
-            <label class="field">计算方式和备注（业务员能看到，必须写）<textarea id="m-note" rows="3" placeholder="例如：房东只给了一半佣金，安丽霞多跑了三趟，所以她拿 3000，其余两人各 1000" ${dis}>${esc(d.manual ? d.manual.note || '' : '')}</textarea></label>
-          </div></div>
         <label class="field">备注<textarea id="f-note" rows="2" ${dis}>${esc(d.note)}</textarea></label>
         <div class="card stack"><h2>这一单怎么分</h2><div id="preview" aria-live="polite"></div></div>
 
@@ -625,8 +626,8 @@
       box.querySelectorAll('input[data-man]').forEach((i) => { old[i.dataset.man] = i.value; });
       const am = d.manual ? d.manual.amounts || {} : {};
       const ppl = U.people({ ...d, listing_agents: C.oneSide(d.type) ? [] : d.listing_agents });
-      box.innerHTML = ppl.length ? ppl.map((n) => `<div class="money-row"><label>${esc(n)}</label><input type="text" class="amt" data-man="${esc(n)}" inputmode="decimal" autocomplete="off" value="${esc(n in old ? old[n] : am[n] ?? '')}" placeholder="0" ${dis} aria-label="${esc(n)}拿多少"></div>`).join('')
-        : '<div class="small muted">先在上面选这一单的业务员</div>';
+      box.innerHTML = ppl.length ? ppl.map((n) => `<div class="money-row"><label>${esc(n)}</label><input type="text" class="amt" data-man="${esc(n)}" inputmode="decimal" autocomplete="off" value="${esc(n in old ? old[n] : am[n] ?? (n in C.FIXED_PAY ? C.FIXED_PAY[n] : ''))}" placeholder="0" ${dis} aria-label="${esc(n)}拿多少"></div>`).join('')
+        : '<div class="small muted">先在下面选这一单的业务员（房源方、客户方），这里就会出现他们的名字</div>';
     }
     function drawIncomes() { $('#income-rows', sheet).innerHTML = moneyRows('incomes', C.INCOME_BY_TYPE[d.type]); $('#expense-rows', sheet).innerHTML = moneyRows('expenses', C.EXPENSE_BY_TYPE[d.type]); }
     function collect() {
@@ -1079,8 +1080,8 @@
               <span class="bd-key">纯利润</span><span class="num bd-key">${f(t.net - t.maint)}</span></div>
             ${internal ? `<div class="bd-group"><span>店面维护成本</span><span class="num">${f(t.maint)}</span><span>房源方、客户方里店面的一半</span><span class="num">${f(t.store - t.maint)}</span>
               <span class="bd-key">店面合计</span><span class="num bd-key">${f(t.store)}</span></div>` : ''}
-            <div class="bd-group">${t.reimb ? `<span>业务员分成</span><span class="num">${f(agentsTotal - t.reimb)}</span><span>加：还业务员垫付的钱</span><span class="num">${f(t.reimb)}</span>` : ''}<span class="bd-key" style="border:0;padding:0">业务员合计</span><span class="num bd-key" style="border:0;padding:0">${f(agentsTotal)}</span></div>
-            ${internal ? `<div class="bd-group"><span class="small muted" style="grid-column:1/-1">核对：店面合计 + 业务员分成 = 总账</span><span>${f(t.store)} + ${f(agentsTotal - t.reimb)}</span><span class="num">${f(t.store + agentsTotal - t.reimb)}</span></div>` : ''}
+            <div class="bd-group">${t.reimb || t.fixed ? `<span>业务员分成</span><span class="num">${f(agentsTotal - t.reimb - t.fixed)}</span>${t.fixed ? `<span>加：${esc(Object.keys(C.FIXED_PAY).join('、'))}固定拿的（已算在支出里）</span><span class="num">${f(t.fixed)}</span>` : ''}${t.reimb ? `<span>加：还业务员垫付的钱</span><span class="num">${f(t.reimb)}</span>` : ''}` : ''}<span class="bd-key" style="border:0;padding:0">业务员合计</span><span class="num bd-key" style="border:0;padding:0">${f(agentsTotal)}</span></div>
+            ${internal ? `<div class="bd-group"><span class="small muted" style="grid-column:1/-1">核对：店面合计 + 业务员分成 = 总账</span><span>${f(t.store)} + ${f(agentsTotal - t.reimb - t.fixed)}</span><span class="num">${f(t.store + agentsTotal - t.reimb - t.fixed)}</span></div>` : ''}
           </div>`}
           <h3>${single ? '每人应得' : '二、每人应得'}</h3>
           <div class="tablewrap"><table><thead><tr><th>姓名</th><th class="r">应得（元）</th>${single ? '<th>确认</th>' : '<th>单数</th>'}</tr></thead><tbody>

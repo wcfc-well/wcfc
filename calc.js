@@ -12,16 +12,16 @@
 
 (function (root) {
   const INCOME_TYPES = ['卖房房东佣金', '卖房客户佣金', '租房佣金', '开发商佣金', '银行返点', '装修返点', '垫资返点', '其他收入'];
-  const EXPENSE_TYPES = ['会计费', '客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'];
+  const EXPENSE_TYPES = ['客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'];
   // 每种房屋类型的支出：新房没有房东的两项
   const EXPENSE_BY_TYPE = {
-    '二手买卖': ['会计费', '客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
-    '租房': ['会计费', '客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
-    '新房': ['会计费', '客户介绍费', '客户维护费', '客户返点', '税费', '其他支出'],
-    '合作': ['会计费', '客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
+    '二手买卖': ['客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
+    '租房': ['客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
+    '新房': ['客户介绍费', '客户维护费', '客户返点', '税费', '其他支出'],
+    '合作': ['客户介绍费', '房东介绍费', '客户维护费', '房东维护费', '客户返点', '税费', '其他支出'],
   };
-  // 曹会计每一单固定拿 500 元，当成本扣（新记的单子自动勾上，2026-11-09）
-  const ACCOUNTANT_FEE = 500;
+  // 固定拿钱的人：只要这一单选了 TA（房源方、客户方都算，两边都选也只算一次），TA 固定拿这么多，当成本先扣，不参加对半分（2026-11-09）
+  const FIXED_PAY = { '曹会计': 500 };
   const MAINT_RATE = { '二手买卖': 10, '租房': 10, '新房': 0, '合作': 0 };
   // 只有佣金扣店面维护成本；银行返点、装修返点、垫资返点、其他收入都不扣
   const COMMISSION_TYPES = ['卖房房东佣金', '卖房客户佣金', '租房佣金', '开发商佣金', '合作总佣金'];
@@ -63,10 +63,18 @@
     return out;
   }
 
+  // 这一单里固定拿钱的人：{名字: 分}。补记返点、疑难单（周姐自己填）不算
+  const fixedOf = (deal) => {
+    if (deal.parent_id || deal.manual) return {};
+    const inDeal = [...(oneSide(deal.type) ? [] : deal.listing_agents || []), ...(deal.client_agents || [])];
+    const out = {}; Object.entries(FIXED_PAY).forEach(([n, y]) => { if (inDeal.includes(n)) out[n] = toFen(y); });
+    return out;
+  };
   // 计算一单
   function calcDeal(deal) {
     const income = sum(deal.incomes);
-    const expense = sum(deal.expenses);
+    const fixed = fixedOf(deal), fixedTotal = Object.values(fixed).reduce((a, b) => a + b, 0);
+    const expense = sum(deal.expenses) + fixedTotal;          // 固定拿钱的算在支出（成本）里
     const isCoop = deal.type === '合作';
     const coopTotal = isCoop ? sum((deal.incomes || []).filter((i) => i.type === '合作总佣金')) : 0;
     const partnerCut = Math.floor(coopTotal / 2);             // 合作中介拿走的一半
@@ -90,8 +98,9 @@
     const clientReturn = returns.client.reduce((a, x) => a + x.fen, 0);
     const listingBlock = listingProfit + listingReturn;
     const clientBlock = clientProfit + clientReturn;
-    const L = splitBlock(listingBlock, isNew ? [] : deal.listing_agents);
-    const C = splitBlock(clientBlock, deal.client_agents);
+    const noFixed = (arr) => (arr || []).filter((n) => !(n in fixed));
+    const L = splitBlock(listingBlock, isNew ? [] : noFixed(deal.listing_agents));
+    const C = splitBlock(clientBlock, noFixed(deal.client_agents));
     const people = {};
     const add = (n, v) => { people[n] = (people[n] || 0) + v; };
     // 疑难单：周姐自己算好每个人拿多少（deal.manual = {amounts: {名字: 元}, note: 计算方式}），不扣 10%、不按比例分，剩下的都是店面的
@@ -101,6 +110,7 @@
       Object.entries(L.agents).forEach(([n, v]) => add(n, v));
       Object.entries(C.agents).forEach(([n, v]) => add(n, v));
     }
+    Object.entries(fixed).forEach(([n, v]) => add(n, v));   // 固定拿钱的人
     // 业务员先垫付、还没还的支出：结算时加回给垫付的人
     const share = { ...people };
     const reimb = {};
@@ -112,23 +122,23 @@
     const warnings = [];
     if (manual) {
       if (store < 0) warnings.push('每个人加起来比总账还多，店面要倒贴，请再核对一下');
-      return { income, expense, partnerCut, isCoop, net, commission, otherIncome, maintBase: 0, maint: 0, rate: 0, rest: net, profit: net, listingPct: 0, listingProfit: 0, clientProfit: 0, returns: { listing: [], client: [] }, listingReturn: 0, clientReturn: 0, listingBlock: 0, clientBlock: 0, listing: { store: 0, agents: {} }, client: { store: 0, agents: {} }, store, people, share, reimb, reimbTotal, warnings, manual: true, manualNote: deal.manual.note || '' };
+      return { income, expense, partnerCut, isCoop, net, commission, otherIncome, maintBase: 0, maint: 0, rate: 0, rest: net, profit: net, listingPct: 0, listingProfit: 0, clientProfit: 0, returns: { listing: [], client: [] }, listingReturn: 0, clientReturn: 0, listingBlock: 0, clientBlock: 0, listing: { store: 0, agents: {} }, client: { store: 0, agents: {} }, store, people, share, reimb, reimbTotal, fixed: {}, fixedTotal: 0, warnings, manual: true, manualNote: deal.manual.note || '' };
     }
-    if (!isNew && listingBlock > 0 && (!deal.listing_agents || !deal.listing_agents.length)) warnings.push('没有选房源方业务员，房源方的钱暂时全算给店面');
-    if (clientBlock > 0 && (!deal.client_agents || !deal.client_agents.length)) warnings.push('没有选客户方业务员，客户方的钱暂时全算给店面');
+    if (!isNew && listingBlock > 0 && !noFixed(deal.listing_agents).length && !(deal.listing_agents || []).length) warnings.push('没有选房源方业务员，房源方的钱暂时全算给店面');
+    if (clientBlock > 0 && !(deal.client_agents || []).length) warnings.push('没有选客户方业务员，客户方的钱暂时全算给店面');
     if (net < 0) warnings.push('这一单支出大于收入');
     const inDeal = [...(isNew ? [] : deal.listing_agents || []), ...(deal.client_agents || [])];
     Object.keys(reimb).forEach((n) => { if (!inDeal.includes(n)) warnings.push(`${n}垫付了钱，但不是这一单的业务员，结算单上不会显示，请把垫付人改成这一单的业务员`); });
-    return { income, expense, partnerCut, isCoop, net, commission, otherIncome, maintBase, maint, rate, rest, profit, listingPct, listingProfit, clientProfit, returns, listingReturn, clientReturn, listingBlock, clientBlock, listing: L, client: C, store, people, share, reimb, reimbTotal, warnings };
+    return { income, expense, partnerCut, isCoop, net, commission, otherIncome, maintBase, maint, rate, rest, profit, listingPct, listingProfit, clientProfit, returns, listingReturn, clientReturn, listingBlock, clientBlock, listing: L, client: C, store, people, share, reimb, reimbTotal, fixed, fixedTotal, warnings };
   }
 
   // 汇总一期
   function calcPeriod(deals) {
-    const totals = { income: 0, expense: 0, net: 0, maint: 0, store: 0, reimb: 0, people: {} };
+    const totals = { income: 0, expense: 0, net: 0, maint: 0, store: 0, reimb: 0, fixed: 0, people: {} };
     const rows = deals.map((d) => {
       const r = calcDeal(d);
       totals.income += r.income; totals.expense += r.expense; totals.net += r.net;
-      totals.maint += r.maint; totals.store += r.store; totals.reimb += r.reimbTotal;
+      totals.maint += r.maint; totals.store += r.store; totals.reimb += r.reimbTotal; totals.fixed += r.fixedTotal;
       Object.entries(r.people).forEach(([n, v]) => { totals.people[n] = (totals.people[n] || 0) + v; });
       return { deal: d, r };
     });
@@ -147,6 +157,6 @@
   }
   // fields：要搜的几段文字；query：用空格隔开的几个词，每个词都要在某一段里找到
   const fuzzy = (fields, query) => String(query || '').trim().split(/\s+/).filter(Boolean).every((w) => fields.some((f) => fuzzyOne(f, w)));
-  const api = { ACCOUNTANT_FEE, fuzzy, oneSide, RETURN_SIDE, sideOf, COMMISSION_TYPES, INCOME_TYPES, INCOME_BY_TYPE, EXPENSE_TYPES, EXPENSE_BY_TYPE, MAINT_RATE, DEAL_TYPES, STORE, toFen, fmt, calcDeal, calcPeriod };
+  const api = { FIXED_PAY, fixedOf, fuzzy, oneSide, RETURN_SIDE, sideOf, COMMISSION_TYPES, INCOME_TYPES, INCOME_BY_TYPE, EXPENSE_TYPES, EXPENSE_BY_TYPE, MAINT_RATE, DEAL_TYPES, STORE, toFen, fmt, calcDeal, calcPeriod };
   if (typeof module !== 'undefined') module.exports = api; else root.Calc = api;
 })(this);

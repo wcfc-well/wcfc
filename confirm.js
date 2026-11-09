@@ -314,7 +314,7 @@
   function dealCard(d, name) {
     const r = C.calcDeal(d); const mine = r.people[name] || 0;
     const roles = d.type === '合作' ? '合作单' : [d.type !== '新房' && d.listing_agents.includes(name) ? '房源方' : '', d.client_agents.includes(name) ? '客户方' : ''].filter(Boolean).join('、');
-    const partners = (arr) => arr.length > 1 ? `，和${arr.filter((n) => n !== name).map(esc).join('、')}平分` : '';
+    const partners = (arr0) => { const arr = arr0.filter((n) => !(n in (r.fixed || {}))); return arr.length > 1 ? `，和${arr.filter((n) => n !== name).map(esc).join('、')}平分` : ''; };
     return { mine, html: `<div class="card stack" style="gap:6px">
       <div class="row" style="gap:10px"><span class="tc tt-${{ '二手买卖': 'a', '租房': 'b', '新房': 'c', '合作': 'd' }[d.type] || 'a'}">${{ '二手买卖': '二手', '租房': '租房', '新房': '新房', '合作': '合作' }[d.type] || esc(d.type)}</span><b style="font-size:18px">${esc(d.title || '（没写房子）')}</b></div>
       <span class="muted small"><span class="num">${d.deal_date}</span>${[d.type === '合作' ? '合作中介：' + esc(d.partner || '—') : '', d.type !== '新房' && d.owner_name ? '房东：' + esc(d.owner_name) : '', d.customer_name ? '客户：' + esc(d.customer_name) : ''].filter(Boolean).map((x) => '　' + x).join('')}</span>
@@ -323,6 +323,7 @@
         <div class="bd-group">
           ${d.incomes.map((i) => `<span class="sub">${esc(i.type + (i.bank ? '（' + i.bank + '）' : '') + (i.person ? '（' + i.person + '）' : ''))}</span><span class="num sub">${C.fmt(C.toFen(i.amount))}</span>`).join('')}
           ${d.expenses.map((i) => `<span class="sub">减：${esc(i.type + (i.person ? '（' + i.person + '）' : '') + (i.memo ? '（' + i.memo + '）' : '') + (i.paid_by ? '（' + i.paid_by + '垫付）' : ''))}</span><span class="num sub">-${C.fmt(C.toFen(i.amount))}</span>`).join('')}
+          ${Object.entries(r.fixed || {}).map(([n, v]) => `<span class="sub">减：${esc(n)}固定拿</span><span class="num sub">-${C.fmt(v)}</span>`).join('')}
           ${r.isCoop ? `<span class="sub">减：合作中介拿一半</span><span class="num sub">-${C.fmt(r.partnerCut)}</span>` : ''}
           <span class="bd-key">总账</span><span class="num bd-key">${C.fmt(r.net)}</span></div>
         ${r.manual ? `<div class="bd-group"><span class="bd-title" style="grid-column:1/-1">这一单情况特殊，周姐单独算的（不按 10% 和对半分）</span>
