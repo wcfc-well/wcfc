@@ -775,3 +775,20 @@ begin
   insert into confirmations (deal_id, agent_name, status, note, at) values (p_deal, a.name, p_status, coalesce(p_note, ''), now())
   on conflict (deal_id, agent_name) do update set status = excluded.status, note = excluded.note, at = now();
 end $$;
+
+-- ---------- 2026-11-09：以前的单子（包括已结算的）都补上曹会计会计费 500 ----------
+-- 只跑一次（记在 app_migrations 里），店面以后手动取消的不会再加回来。直接改，不作废确认、不退回重新确认。
+create table if not exists app_migrations (name text primary key, ran_at timestamptz not null default now());
+alter table app_migrations enable row level security;
+do $$
+declare n int;
+begin
+  if exists (select 1 from app_migrations where name = 'accountant_fee_backfill') then return; end if;
+  alter table deals disable trigger user;
+  update deals set expenses = jsonb_build_array(jsonb_build_object('type', '会计费', 'amount', 500, 'memo', '曹会计')) || expenses
+    where parent_id is null and not exists (select 1 from jsonb_array_elements(expenses) e where e->>'type' = '会计费');
+  get diagnostics n = row_count;
+  alter table deals enable trigger user;
+  insert into app_migrations (name) values ('accountant_fee_backfill');
+  raise notice '补上会计费的单子：% 单', n;
+end $$;
