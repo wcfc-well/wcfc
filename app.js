@@ -146,7 +146,7 @@
     return `<details class="dd card"${open ? ' open' : ''}><summary><div class="row" style="gap:8px;flex-wrap:nowrap">${typeTag(d.type)}<b class="grow">${esc(d.title || '（没写房子）')}</b><b class="num">${f(r.net)}</b></div>
         <div class="small muted"><span class="num">${d.deal_date}</span>　${esc(partyText(d))}</div>
         <div class="small muted">业务员　${esc(whoText(d))}</div><span class="dd-hint no-print"></span></summary>
-      ${breakdownHTML(d, forStatement)}${d.note ? `<div class="small muted">备注：${esc(d.note)}</div>` : ''}</details>`;
+      ${breakdownHTML(d, forStatement)}${d.note && !d.manual ? `<div class="small muted">备注：${esc(d.note)}</div>` : ''}</details>`;
   }
 
   // ---------- 打印 / 存 PDF / 存图片（结算单、店面收入、业务员业绩共用） ----------
@@ -607,11 +607,10 @@
           <div class="small muted" style="margin-top:6px">介绍费写介绍人名字。维护费一行一个人：选谁垫的钱、写备注（例如请吃饭）和金额，好几个人垫钱就点“＋ 再加一个人”。选了名字的，结算时这笔钱会还给这个人；店里（周姐）付的就选“周姐”。</div></div>
         <div class="card stack" id="listing-box"><h3>房源方业务员（可多选）</h3><div class="chips">${chips('listing_agents')}</div></div>
         <div class="card stack"><h3 id="client-h">客户方业务员（可多选）</h3><div class="chips">${chips('client_agents')}</div></div>
-        <label class="field">备注<textarea id="f-note" rows="2" ${dis}>${esc(d.note)}</textarea></label>
+        <label class="field"><span id="f-note-l">${d.manual ? '计算方式（疑难单必填，业务员能看到）' : '备注'}</span><textarea id="f-note" rows="2" placeholder="${d.manual ? '计算方式' : ''}" ${dis}>${esc(d.note || (d.manual && d.manual.note) || '')}</textarea></label>
         <div class="card stack"><h2>这一单怎么分</h2>
           <div id="m-body" class="stack" style="gap:8px;padding:10px;border:1px dashed #d9b45a;border-radius:10px" ${d.manual ? '' : 'hidden'}>
             <b>疑难单：每个人拿多少</b><div class="small" id="m-rest"></div><div id="m-rows" class="stack" style="gap:6px"></div>
-            <label class="field">计算方式和备注（业务员能看到，必须写）<textarea id="m-note" rows="3" placeholder="例如：房东只给了一半佣金，安丽霞多跑了三趟，所以她拿 3000，其余两人各 1000" ${dis}>${esc(d.manual ? d.manual.note || '' : '')}</textarea></label>
           </div>
           <div id="preview" aria-live="polite"></div></div>
 
@@ -642,7 +641,7 @@
       d.owner_name = d.type === '新房' ? '' : $('#f-owner', sheet).value.trim(); d.partner = d.type === '合作' ? $('#f-partner', sheet).value.trim() : ''; d.customer_name = $('#f-cust', sheet).value.trim();
       if ($('#m-on', sheet).checked) {
         const amounts = {}; sheet.querySelectorAll('input[data-man]').forEach((i) => { amounts[i.dataset.man] = i.value === '' ? '' : Number(i.value); });
-        d.manual = { amounts, note: $('#m-note', sheet).value.trim() };
+        d.manual = { amounts, note: $('#f-note', sheet).value.trim() };  // 疑难单的计算方式就写在备注里
       } else d.manual = null;
       ['incomes', 'expenses'].forEach((k) => {
         d[k] = [...sheet.querySelectorAll(`input[type=checkbox][data-kind=${k}]`)].filter((c) => c.checked).flatMap((c) => {
@@ -726,7 +725,7 @@
       if (i >= 0) arr.splice(i, 1); else arr.push(n);
       b.setAttribute('aria-pressed', i < 0); drawManual(); preview();
     });
-    $('#m-on', sheet).onchange = () => { $('#m-body', sheet).hidden = $('#m-tip', sheet).hidden = !$('#m-on', sheet).checked; drawManual(); };
+    $('#m-on', sheet).onchange = () => { const on = $('#m-on', sheet).checked; $('#m-body', sheet).hidden = $('#m-tip', sheet).hidden = !on; $('#f-note-l', sheet).textContent = on ? '计算方式（疑难单必填，业务员能看到）' : '备注'; $('#f-note', sheet).placeholder = on ? '计算方式' : ''; drawManual(); };
     $('#s-cancel', sheet).onclick = close;
     if ($('#s-addon', sheet)) $('#s-addon', sheet).onclick = () => { close(); openAddon(deal, null); };
     sheet.querySelectorAll('[data-addon]').forEach((b) => b.onclick = () => { close(); openAddon(deal, state.deals.find((x) => String(x.id) === b.dataset.addon)); });
@@ -751,7 +750,7 @@
         Object.keys(am).forEach((n) => { if (!ppl.includes(n)) delete am[n]; });
         const miss = ppl.filter((n) => am[n] === '' || am[n] == null || isNaN(am[n]));
         if (miss.length) return toast(`疑难单：请填 ${miss.join('、')} 拿多少（不拿钱就填 0）`);
-        if (!d.manual.note) return toast('疑难单：请写一下计算方式');
+        if (!d.manual.note) { $('#f-note', sheet).focus(); return toast('疑难单：请在备注里写计算方式'); }
       }
       if (d.type !== '新房') {
         const h = house();
