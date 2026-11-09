@@ -577,8 +577,9 @@
         ${deal && deal.status === 'confirming' ? '<div class="notice">业务员们正在确认这一单。现在改的话，大家要重新确认。</div>' : ''}
         ${deal && deal.status !== 'draft' ? `<div class="card stack" style="gap:6px"><h3>业务员确认情况</h3>
           ${p.who.map((n) => { const c = p.cm[n]; return `<div class="row between"><span>${esc(n)}</span>${c && c.status === 'ok' ? '<span class="pill ok">已确认</span>' : '<span class="pill gray">还没确认</span>'}</div>`; }).join('')}</div>` : ''}
-        <div class="card stack" id="manual-box" style="gap:8px;border:2px solid #e0a800">
-          <label class="row" style="gap:8px;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="m-on" ${d.manual ? 'checked' : ''} ${dis} style="margin-top:4px;width:26px;height:26px;min-height:0;flex:none;padding:0"><span><b>疑难单：我自己算每个人拿多少</b><br><span class="small muted">特殊的单子才勾。不按 10% 和对半分：给下面选的每位业务员填金额，剩下的归店面。确认、结算照常。</span></span></label>
+        <div class="stack" id="manual-box" style="gap:6px;padding:6px 12px;border:1px dashed #d9b45a;border-radius:10px">
+          <label class="row small" style="gap:6px;flex-wrap:nowrap;align-items:center;cursor:pointer"><input type="checkbox" id="m-on" ${d.manual ? 'checked' : ''} ${dis} style="width:18px;height:18px;min-height:0;flex:none;padding:0;margin:0"><span>疑难单（自己填每人拿多少）</span></label>
+          <div class="small muted" id="m-tip" ${d.manual ? '' : 'hidden'}>不按 10% 和对半分，给下面选的业务员填金额，剩下归店面。</div>
           <div id="m-body" class="stack" style="gap:8px" ${d.manual ? '' : 'hidden'}>
             <div id="m-rows" class="stack" style="gap:6px"></div>
             <label class="field">计算方式和备注（业务员能看到，必须写）<textarea id="m-note" rows="3" placeholder="例如：房东只给了一半佣金，安丽霞多跑了三趟，所以她拿 3000，其余两人各 1000" ${dis}>${esc(d.manual ? d.manual.note || '' : '')}</textarea></label>
@@ -722,7 +723,7 @@
       if (i >= 0) arr.splice(i, 1); else arr.push(n);
       b.setAttribute('aria-pressed', i < 0); drawManual(); preview();
     });
-    $('#m-on', sheet).onchange = () => { $('#m-body', sheet).hidden = !$('#m-on', sheet).checked; drawManual(); };
+    $('#m-on', sheet).onchange = () => { $('#m-body', sheet).hidden = $('#m-tip', sheet).hidden = !$('#m-on', sheet).checked; drawManual(); };
     $('#s-cancel', sheet).onclick = close;
     if ($('#s-addon', sheet)) $('#s-addon', sheet).onclick = () => { close(); openAddon(deal, null); };
     sheet.querySelectorAll('[data-addon]').forEach((b) => b.onclick = () => { close(); openAddon(deal, state.deals.find((x) => String(x.id) === b.dataset.addon)); });
