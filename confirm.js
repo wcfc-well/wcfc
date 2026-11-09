@@ -189,7 +189,7 @@
         <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
         <label class="field">小区<select id="e-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
         <input id="e-comm" value="${esc(other ? x.community : '')}" placeholder="写小区名字" aria-label="其他小区名字" ${other ? '' : 'hidden'}>
-        <label class="field">坐落<input id="e-unit" value="${esc(x.unit)}" placeholder="例如：7幢2单元601"></label>
+        <label class="field">坐落<input id="e-unit" value="${esc(x.unit)}" placeholder="xx-xx"></label>
         <div id="e-dup" class="notice err" hidden></div>
         <label class="field">户型分类<select id="e-cat"><option value="">—</option>${opt(CATS, x.category)}</select></label>
         <div class="row" style="flex-wrap:nowrap" id="e-rh" ${x.category === '商铺' ? 'hidden' : ''}>

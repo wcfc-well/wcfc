@@ -581,7 +581,7 @@
           <div style="display:flex;flex-direction:column;gap:4px"><span class="small muted">房屋类型</span>
             <div class="seg types" role="group" aria-label="房屋类型">${C.DEAL_TYPES.map((t) => `<button type="button" data-type="${t}" aria-pressed="${d.type === t}" ${dis}>${t === '二手买卖' ? '二手' : t === '合作' ? '🤝 合作' : t}</button>`).join('')}</div></div>
           <div class="field" id="house-box"><span>房子</span>
-            <div class="lf-pair"><select id="f-comm" aria-label="小区" ${dis}></select><input id="f-unit" list="f-units" value="" placeholder="坐落，例如 7幢601" aria-label="坐落" autocomplete="off" ${dis}></div>
+            <div class="lf-pair"><select id="f-comm" aria-label="小区" ${dis}></select><input id="f-unit" list="f-units" value="" placeholder="坐落 xx-xx" aria-label="坐落" autocomplete="off" ${dis}></div>
             <input id="f-comm-other" placeholder="写小区名字" aria-label="其他小区名字" hidden ${dis}>
             <datalist id="f-units"></datalist>
             <div id="f-house-info" class="small muted"></div></div>
@@ -1237,7 +1237,7 @@
           <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
           <label class="field">小区<select id="l-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
           <input id="l-comm" value="${esc(other ? x.community : '')}" placeholder="写小区名字" aria-label="其他小区名字" ${other ? '' : 'hidden'}>
-          ${inp('l-unit', '坐落', x.unit, '例如：7号楼2单元601')}
+          ${inp('l-unit', '坐落', x.unit, 'xx-xx')}
           <div id="l-dup" class="notice err" hidden></div>
           <label class="field">户型分类<select id="l-cat"><option value="">—</option>${opt(CATS, x.category)}</select></label>
           <div class="row" style="flex-wrap:nowrap" id="l-rh">
