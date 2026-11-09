@@ -101,6 +101,11 @@
     const r = C.calcDeal(d);
     const lines = (items, minus) => items.map((i) => `<span class="sub">${minus ? '减：' : ''}${esc(itemName(i))}</span><span class="num sub">${minus ? '-' : ''}${f(C.toFen(i.amount))}</span>`).join('');
     const retName = (x) => x.type + (x.bank ? `（${x.bank}）` : '');
+    const manualPart = r.manual ? `<div class="bd-group"><span class="bd-title">二、疑难单：周姐单独算</span>
+        <span class="sub" style="grid-column:1/-1">这一单不按 10% 维护和对半分，每个人拿多少是周姐算好填的。</span>
+        ${Object.entries(r.share).map(([n, v]) => `<span>${esc(n)}</span><span class="num">${f(v)}</span>`).join('') || '<span class="muted">还没填</span><span></span>'}
+        ${forStatement ? '' : `<span>店面（总账 − 业务员合计）</span><span class="num">${f(r.store)}</span>`}
+        ${r.manualNote ? `<span class="sub" style="grid-column:1/-1;white-space:pre-wrap">计算方式：${esc(r.manualNote)}</span>` : ''}</div>` : '';
     const block = (title, blk, side, agents, profitPart, pct, rets, plabel) => {
       if (!blk) return '';
       const parts = (rets.length ? `<span class="sub">${plabel || '佣金纯利润 ' + pct + '%'}</span><span class="num sub">${f(profitPart)}</span>` + rets.map((x) => `<span class="sub">加：${esc(retName(x))}（不扣 10%）</span><span class="num sub">${f(x.fen)}</span>`).join('') : '');
@@ -115,6 +120,7 @@
         ${lines(d.expenses, true)}<span>支出合计</span><span class="num">-${f(r.expense)}</span>
         ${r.isCoop ? `<span>减：合作中介拿一半${d.partner ? '（' + esc(d.partner) + '）' : ''}</span><span class="num">-${f(r.partnerCut)}</span>` : ''}
         <span class="bd-key">总账（${r.isCoop ? '我们这一半 − 支出' : '收入 − 支出'}）</span><span class="num bd-key">${f(r.net)}</span></div>
+      ${r.manual ? manualPart : `
       <div class="bd-group"><span class="bd-title">二、纯利润</span>
         <span>总账</span><span class="num">${f(r.net)}</span>
         ${d.parent_id ? '<span class="sub" style="grid-column:1/-1">返点不扣店面维护</span>' : r.rate ? `<span>减：店面维护成本 ${r.rate}%</span><span class="num">-${f(r.maint)}</span>${r.otherIncome || r.expense ? `<span class="sub" style="grid-column:1/-1">只扣佣金部分：（佣金 ${f(r.commission)}${r.expense ? ' − 支出 ' + f(r.expense) : ''}）× ${r.rate}%${r.otherIncome ? '，返点等其他收入 ' + f(r.otherIncome) + ' 不扣' : ''}</span>` : ''}` : `<span class="sub" style="grid-column:1/-1">${r.isCoop ? '合作单不扣店面维护成本，总账就是纯利润' : '新房不扣店面维护成本，总账就是纯利润'}</span>`}
@@ -122,7 +128,7 @@
         ${r.otherIncome && r.isCoop ? '<span class="sub" style="grid-column:1/-1">合作单的返点和其他收入不给合作中介、不扣 10%，和我们那一半佣金放在一起，店面一半、业务员一半</span>' : ''}${r.otherIncome && !r.isCoop ? `<span class="sub" style="grid-column:1/-1">佣金部分 ${f(r.profit)} 按${d.type === '新房' ? '客户方 100%' : '房源方 20%、客户方 80%'}分；返点不按比例，直接归一方：${d.type === '新房' ? '新房全部归客户方' : '银行、装修返点归客户方，垫资返点归房源方，其他收入看选的哪一方'}</span>` : ''}</div>
       ${r.isCoop ? block('三、店面和业务员分（合作单不分房源方、客户方）', r.clientBlock, r.client, d.client_agents, r.clientProfit, 100, r.returns.client, '佣金我们这一半 − 支出')
         : d.type === '新房' ? block('三、客户方（新房，没有房源方）', r.clientBlock, r.client, d.client_agents, r.clientProfit, 100, r.returns.client)
-        : block('三、房源方', r.listingBlock, r.listing, d.listing_agents, r.listingProfit, 20, r.returns.listing) + block('四、客户方', r.clientBlock, r.client, d.client_agents, r.clientProfit, 80, r.returns.client)}
+        : block('三、房源方', r.listingBlock, r.listing, d.listing_agents, r.listingProfit, 20, r.returns.listing) + block('四、客户方', r.clientBlock, r.client, d.client_agents, r.clientProfit, 80, r.returns.client)}`}
       ${reimbHTML(r)}
       ${forStatement ? '' : `<div class="bd-group bd-store"><span class="bd-title">这一单合计</span>
         <span class="bd-key" style="border:0;padding:0">店面</span><span class="num bd-key" style="border:0;padding:0">${f(r.store)}</span>
@@ -596,6 +602,12 @@
           <div class="small muted" style="margin-top:6px">介绍费写介绍人名字。维护费一行一个人：选谁垫的钱、写备注（例如请吃饭）和金额，好几个人垫钱就点“＋ 再加一个人”。选了名字的，结算时这笔钱会还给这个人；店里（周姐）付的就选“周姐”。</div></div>
         <div class="card stack" id="listing-box"><h3>房源方业务员（可多选）</h3><div class="chips">${chips('listing_agents')}</div></div>
         <div class="card stack"><h3 id="client-h">客户方业务员（可多选）</h3><div class="chips">${chips('client_agents')}</div></div>
+        <div class="card stack" id="manual-box" style="gap:8px">
+          <label class="row" style="gap:8px;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="m-on" ${d.manual ? 'checked' : ''} ${dis} style="margin-top:4px"><span><b>疑难单：我自己算每个人拿多少</b><br><span class="small muted">不按 10% 和对半分。勾上后，给上面选的每位业务员填金额，剩下的归店面。确认、结算照常。</span></span></label>
+          <div id="m-body" class="stack" style="gap:8px" ${d.manual ? '' : 'hidden'}>
+            <div id="m-rows" class="stack" style="gap:6px"></div>
+            <label class="field">计算方式和备注（业务员能看到，必须写）<textarea id="m-note" rows="3" placeholder="例如：房东只给了一半佣金，安丽霞多跑了三趟，所以她拿 3000，其余两人各 1000" ${dis}>${esc(d.manual ? d.manual.note || '' : '')}</textarea></label>
+          </div></div>
         <label class="field">备注<textarea id="f-note" rows="2" ${dis}>${esc(d.note)}</textarea></label>
         <div class="card stack"><h2>这一单怎么分</h2><div id="preview" aria-live="polite"></div></div>
 
@@ -607,6 +619,15 @@
       </div>`, '记一单');
     const close = () => sheet.remove();
 
+    // 疑难单：上面选了哪些业务员，这里就一人一行填金额（已经填的保留）
+    function drawManual() {
+      const box = $('#m-rows', sheet), old = {};
+      box.querySelectorAll('input[data-man]').forEach((i) => { old[i.dataset.man] = i.value; });
+      const am = d.manual ? d.manual.amounts || {} : {};
+      const ppl = U.people({ ...d, listing_agents: C.oneSide(d.type) ? [] : d.listing_agents });
+      box.innerHTML = ppl.length ? ppl.map((n) => `<div class="money-row"><label>${esc(n)}</label><input type="text" class="amt" data-man="${esc(n)}" inputmode="decimal" autocomplete="off" value="${esc(n in old ? old[n] : am[n] ?? '')}" placeholder="0" ${dis} aria-label="${esc(n)}拿多少"></div>`).join('')
+        : '<div class="small muted">先在上面选这一单的业务员</div>';
+    }
     function drawIncomes() { $('#income-rows', sheet).innerHTML = moneyRows('incomes', C.INCOME_BY_TYPE[d.type]); $('#expense-rows', sheet).innerHTML = moneyRows('expenses', C.EXPENSE_BY_TYPE[d.type]); }
     function collect() {
       const h = house();
@@ -615,6 +636,10 @@
       d.title = d.type === '新房' ? $('#f-title', sheet).value.trim() : h.comm || h.unit ? `${h.comm} ${h.unit}`.trim() : d.title;
       { const pv = $('#f-price', sheet).value.replace(/[^\d.]/g, ''); d.deal_price = pv === '' ? null : Number(pv); }
       d.owner_name = d.type === '新房' ? '' : $('#f-owner', sheet).value.trim(); d.partner = d.type === '合作' ? $('#f-partner', sheet).value.trim() : ''; d.customer_name = $('#f-cust', sheet).value.trim();
+      if ($('#m-on', sheet).checked) {
+        const amounts = {}; sheet.querySelectorAll('input[data-man]').forEach((i) => { amounts[i.dataset.man] = i.value === '' ? '' : Number(i.value); });
+        d.manual = { amounts, note: $('#m-note', sheet).value.trim() };
+      } else d.manual = null;
       ['incomes', 'expenses'].forEach((k) => {
         d[k] = [...sheet.querySelectorAll(`input[type=checkbox][data-kind=${k}]`)].filter((c) => c.checked).flatMap((c) => {
           if (c.dataset.multi) {
@@ -660,7 +685,7 @@
       preview();
     });
     sheet.addEventListener('change', (e) => {
-      if (e.target.type === 'checkbox') {
+      if (e.target.type === 'checkbox' && e.target.dataset.kind) {
         const on = e.target.checked, t = e.target.dataset.t, k = e.target.dataset.kind;
         if (e.target.dataset.multi) {
           const box = sheet.querySelector(`.mlines[data-ml="${t}"]`); box.hidden = !on;
@@ -689,13 +714,14 @@
       d.incomes = d.incomes.filter((i) => C.INCOME_BY_TYPE[d.type].includes(i.type)); // 换类型时去掉不属于这个类型的佣金
       d.expenses = d.expenses.filter((i) => C.EXPENSE_BY_TYPE[d.type].includes(i.type));
       sheet.querySelectorAll('.seg button').forEach((x) => x.setAttribute('aria-pressed', x === b));
-      drawIncomes(); preview();
+      drawIncomes(); drawManual(); preview();
     });
     sheet.querySelectorAll('.chip').forEach((b) => b.onclick = () => {
       const arr = d[b.dataset.f], n = b.dataset.n, i = arr.indexOf(n);
       if (i >= 0) arr.splice(i, 1); else arr.push(n);
-      b.setAttribute('aria-pressed', i < 0); preview();
+      b.setAttribute('aria-pressed', i < 0); drawManual(); preview();
     });
+    $('#m-on', sheet).onchange = () => { $('#m-body', sheet).hidden = !$('#m-on', sheet).checked; drawManual(); };
     $('#s-cancel', sheet).onclick = close;
     if ($('#s-addon', sheet)) $('#s-addon', sheet).onclick = () => { close(); openAddon(deal, null); };
     sheet.querySelectorAll('[data-addon]').forEach((b) => b.onclick = () => { close(); openAddon(deal, state.deals.find((x) => String(x.id) === b.dataset.addon)); });
@@ -715,6 +741,13 @@
       if (C.oneSide(d.type)) d.listing_agents = [];
       if (d.type === '合作' && !d.partner) return toast('请写合作的中介名字');
       if (!U.people(d).length) return toast('请先选这一单的业务员');
+      if (d.manual) {
+        const ppl = U.people(d), am = d.manual.amounts;
+        Object.keys(am).forEach((n) => { if (!ppl.includes(n)) delete am[n]; });
+        const miss = ppl.filter((n) => am[n] === '' || am[n] == null || isNaN(am[n]));
+        if (miss.length) return toast(`疑难单：请填 ${miss.join('、')} 拿多少（不拿钱就填 0）`);
+        if (!d.manual.note) return toast('疑难单：请写一下计算方式');
+      }
       if (d.type !== '新房') {
         const h = house();
         if (!h.comm || !h.unit) return toast('请选小区、填坐落');
@@ -792,7 +825,7 @@
     if ($('#f-title', sheet)) $('#f-title', sheet).addEventListener('input', showHouse);
     showHouse();
     if ($('#s-save', sheet)) $('#s-save', sheet).onclick = () => save(true); // 保存后直接进入待确认
-    drawIncomes(); preview();
+    drawIncomes(); drawManual(); preview();
   }
 
   // ---------- 结算：按月份展开，一单一单勾选 ----------

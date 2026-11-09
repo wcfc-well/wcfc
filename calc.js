@@ -94,16 +94,26 @@
     const C = splitBlock(clientBlock, deal.client_agents);
     const people = {};
     const add = (n, v) => { people[n] = (people[n] || 0) + v; };
-    Object.entries(L.agents).forEach(([n, v]) => add(n, v));
-    Object.entries(C.agents).forEach(([n, v]) => add(n, v));
+    // 疑难单：周姐自己算好每个人拿多少（deal.manual = {amounts: {名字: 元}, note: 计算方式}），不扣 10%、不按比例分，剩下的都是店面的
+    const manual = !!(deal.manual && deal.manual.amounts && !deal.parent_id);
+    if (manual) Object.entries(deal.manual.amounts).forEach(([n, v]) => { const fen = toFen(v); if (fen) add(n, fen); });
+    else {
+      Object.entries(L.agents).forEach(([n, v]) => add(n, v));
+      Object.entries(C.agents).forEach(([n, v]) => add(n, v));
+    }
     // 业务员先垫付、还没还的支出：结算时加回给垫付的人
     const share = { ...people };
     const reimb = {};
     (deal.expenses || []).forEach((it) => { if (it.paid_by) reimb[it.paid_by] = (reimb[it.paid_by] || 0) + toFen(it.amount); });
     Object.entries(reimb).forEach(([n, v]) => add(n, v));
     const reimbTotal = Object.values(reimb).reduce((a, b) => a + b, 0);
-    const store = maint + L.store + C.store;
+    const shareSum = Object.values(share).reduce((a, b) => a + b, 0);
+    const store = manual ? net - shareSum : maint + L.store + C.store;
     const warnings = [];
+    if (manual) {
+      if (store < 0) warnings.push('每个人加起来比总账还多，店面要倒贴，请再核对一下');
+      return { income, expense, partnerCut, isCoop, net, commission, otherIncome, maintBase: 0, maint: 0, rate: 0, rest: net, profit: net, listingPct: 0, listingProfit: 0, clientProfit: 0, returns: { listing: [], client: [] }, listingReturn: 0, clientReturn: 0, listingBlock: 0, clientBlock: 0, listing: { store: 0, agents: {} }, client: { store: 0, agents: {} }, store, people, share, reimb, reimbTotal, warnings, manual: true, manualNote: deal.manual.note || '' };
+    }
     if (!isNew && listingBlock > 0 && (!deal.listing_agents || !deal.listing_agents.length)) warnings.push('没有选房源方业务员，房源方的钱暂时全算给店面');
     if (clientBlock > 0 && (!deal.client_agents || !deal.client_agents.length)) warnings.push('没有选客户方业务员，客户方的钱暂时全算给店面');
     if (net < 0) warnings.push('这一单支出大于收入');

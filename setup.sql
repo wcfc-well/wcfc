@@ -96,6 +96,8 @@ create or replace function deal_people(d deals) returns text[] language sql immu
 $$;
 
 -- ---------- 规则 ----------
+-- 2026-11-09 疑难单：周姐自己算每个人拿多少 {amounts: {名字: 元}, note: 计算方式}，空就是按规则算
+alter table deals add column if not exists manual jsonb;
 create or replace function guard_deals() returns trigger language plpgsql as $$
 begin
   if tg_op = 'DELETE' then
@@ -111,8 +113,8 @@ begin
     end if;
     if old.status = 'locked' then
       -- 锁定后只允许结算（改 settlement_id），以及改客户名字、电话（不影响分钱）
-      if row(new.deal_date, new.type, new.title, new.owner_name, new.incomes, new.expenses, new.listing_agents, new.client_agents, new.note, new.status, new.reopen_note, new.reopen_count)
-         is distinct from row(old.deal_date, old.type, old.title, old.owner_name, old.incomes, old.expenses, old.listing_agents, old.client_agents, old.note, old.status, old.reopen_note, old.reopen_count) then
+      if row(new.deal_date, new.type, new.title, new.owner_name, new.incomes, new.expenses, new.listing_agents, new.client_agents, new.manual, new.note, new.status, new.reopen_note, new.reopen_count)
+         is distinct from row(old.deal_date, old.type, old.title, old.owner_name, old.incomes, old.expenses, old.listing_agents, old.client_agents, old.manual, old.note, old.status, old.reopen_note, old.reopen_count) then
         raise exception '这一单大家已经确认锁定，不能再改';
       end if;
       return new;
@@ -124,8 +126,8 @@ begin
       raise exception '要等相关业务员都确认后才会自动锁定';
     end if;
     -- 内容改了或撤回成草稿：确认作废，需要重新确认（客户名字、电话不影响分钱，客户方业务员确认时会补，不作废）
-    if row(old.deal_date, old.type, old.incomes, old.expenses, old.listing_agents, old.client_agents, old.owner_name)
-         is distinct from row(new.deal_date, new.type, new.incomes, new.expenses, new.listing_agents, new.client_agents, new.owner_name)
+    if row(old.deal_date, old.type, old.incomes, old.expenses, old.listing_agents, old.client_agents, old.owner_name, old.manual)
+         is distinct from row(new.deal_date, new.type, new.incomes, new.expenses, new.listing_agents, new.client_agents, new.owner_name, new.manual)
        or new.status = 'draft' then
       delete from confirmations where deal_id = old.id;
     end if;
