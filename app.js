@@ -1128,7 +1128,7 @@
   const layoutText = (x) => x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
   const cardSpec = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : ''].filter(Boolean).map(esc).join(' · ') || '还没填户型';  // 列表卡片只放最简单的
   const specLine = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : '', x.decoration, x.elevator ? '有电梯' : '没电梯'].filter(Boolean).map(esc).join(' · ');
-  const LF0 = { kind: '', status: 'done', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
+  const LF0 = { kind: '', status: 'active', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
   const matchListing = (x, F, noStatus) => {
     const kw = (F.q || '').trim();
     if (!noStatus && F.status && x.status !== F.status) return false;
