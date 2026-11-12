@@ -17,7 +17,7 @@
   const monthLabel = (m) => `${m.slice(0, 4)}年${Number(m.slice(5, 7))}月`;
   const CONFIRM_URL = () => new URL('confirm.html', location.href).href;
 
-  const state = { tab: 'deals', month: '', dq: '', dstat: '', agents: [], deals: [], settlements: [], confs: [], listings: [], lf: { q: '' }, selected: new Set(), openMonths: null };
+  const state = { tab: 'deals', month: '', dq: '', dstat: '', agents: [], deals: [], settlements: [], confs: [], listings: [], lf: { q: '' }, selected: new Set(), openMonths: null, todoOpen: new Set() };
   const app = $('#app');
   // 打印 / 存 PDF 时把收起的明细全部展开
   window.addEventListener('beforeprint', () => document.querySelectorAll('#statement details').forEach((x) => { x.open = true; }));
@@ -338,7 +338,7 @@
     const lTitle = (l) => `${esc(l.community || '')} ${esc(l.unit || '')}`.trim() || '（没写坐落）';
     const lBtn = (l, extra) => `<button class="deal-line" data-l="${l.id}"><div class="row" style="gap:8px;flex-wrap:nowrap"><b class="grow">${lTitle(l)}</b><span class="muted">›</span></div><div class="small muted">${esc(l.kind || '')}　维护人：${esc((l.agents || []).join('、') || '—')}${extra ? '　' + extra : ''}</div></button>`;
     const nameBtn = (n, txt) => `<button class="deal-line" data-a="${esc(n)}"><div class="row" style="gap:8px;flex-wrap:nowrap"><b class="grow">${esc(n)}</b><span>${txt}</span><span class="muted">›</span></div></button>`;
-    const sec = (title, n, hint, body, ok) => `<details class="card todo-sec" ${n ? 'open' : ''}><summary class="row between"><b>${title}</b>${n ? `<span class="todo-n">${n}</span>` : '<span class="pill ok">都好了</span>'}</summary>
+    const sec = (title, n, hint, body, ok) => `<details class="card todo-sec" data-sec="${esc(title)}" ${state.todoOpen.has(title) ? 'open' : ''}><summary class="row between"><b>${title}</b>${n ? `<span class="todo-n">${n}</span>` : '<span class="pill ok">都好了</span>'}</summary>
       ${n ? `<div class="small muted" style="margin:6px 0">${hint}</div>${body}` : `<div class="small muted" style="margin-top:6px">${ok}</div>`}</details>`;
     const unconfRows = sortNames(Object.keys(t.unconf)).map((n) => { const ds = t.unconf[n]; const old = Math.max(...ds.map((d) => daysAgo(d.updated_at || d.created_at) || 0)); return nameBtn(n, `<b class="num">${ds.length}</b> 单没确认${old >= 2 ? `<span class="small muted">（最久等了 ${old} 天）</span>` : ''}`); }).join('');
     const custRows = byPerson(t.noCust, (d) => d.cust_owner ? [d.cust_owner] : d.client_agents).map(([n, ds]) => `<div class="small" style="margin-top:8px"><b>${esc(n)}</b>（${ds.length} 单）</div>${ds.map((d) => dealBtn(d, d.customer_name ? '缺电话' : '名字、电话都没填')).join('')}`).join('');
@@ -375,6 +375,8 @@
     app.querySelectorAll('[data-d]').forEach((b) => b.onclick = () => openDeal(state.deals.find((d) => String(d.id) === b.dataset.d)));
     app.querySelectorAll('[data-l]').forEach((b) => b.onclick = () => openListing(state.listings.find((l) => String(l.id) === b.dataset.l)));
     app.querySelectorAll('[data-a]').forEach((b) => b.onclick = () => openAgent(b.dataset.a));
+    // 待办各栏默认收起；点开的记住，刷新后还是开着
+    app.querySelectorAll('details[data-sec]').forEach((x) => x.ontoggle = () => { if (x.open) state.todoOpen.add(x.dataset.sec); else state.todoOpen.delete(x.dataset.sec); });
     if ($('#go-settle')) $('#go-settle').onclick = () => { state.tab = 'settle'; render(); };
     const bodyOf = (n) => '您还有 ' + Object.entries(t.per[n]).filter(([, v]) => v).map(([k, v]) => v + ' ' + LBL[k]).join('，') + '。点开处理一下。';
     const doNudge = async (names, btn) => {
@@ -1126,7 +1128,7 @@
   const layoutText = (x) => x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
   const cardSpec = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : ''].filter(Boolean).map(esc).join(' · ') || '还没填户型';  // 列表卡片只放最简单的
   const specLine = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : '', x.decoration, x.elevator ? '有电梯' : '没电梯'].filter(Boolean).map(esc).join(' · ');
-  const LF0 = { kind: '', status: '', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
+  const LF0 = { kind: '', status: 'done', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
   const matchListing = (x, F, noStatus) => {
     const kw = (F.q || '').trim();
     if (!noStatus && F.status && x.status !== F.status) return false;
