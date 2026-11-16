@@ -474,7 +474,7 @@
         <div class="notice">原单：${esc(parent.deal_date)}　${esc(parent.title || '')}<br><span class="small">原单不动，也不用重新确认。这一笔单独算，只有分这笔钱的业务员确认一下。</span></div>
         ${addon ? steps(addon) : ''}
         ${addon ? '<button class="btn-primary btn-block" id="a-stmt">这一笔的结算单（发到群里）</button>' : ''}
-        ${addon && addon.status !== 'draft' ? `<div class="card stack" style="gap:6px"><h3>业务员确认情况</h3>${p.who.map((n) => { const c = p.cm[n]; return `<div class="row between"><span>${esc(n)}</span>${c && c.status === 'ok' ? '<span class="pill ok">已确认</span>' : '<span class="pill gray">还没确认</span>'}</div>`; }).join('')}</div>` : ''}
+        ${addon && addon.status !== 'draft' ? `<div class="card stack" style="gap:6px"><h3>业务员确认情况</h3>${p.who.map((n) => { const c = p.cm[n]; return `<div class="row between"><span>${esc(n)}</span>${state.agents.some((a) => a.name === n && a.auto_confirm) ? '<span class="pill ok">自动确认</span>' : c && c.status === 'ok' ? '<span class="pill ok">已确认</span>' : '<span class="pill gray">还没确认</span>'}</div>`; }).join('')}</div>` : ''}
         ${locked ? '<div class="notice">相关业务员都确认了，这一笔已锁定。</div>' : ''}
         <div class="card stack">
           <label class="field">到账日期<input type="date" id="a-date" value="${addon ? addon.deal_date : today()}" ${dis}></label>
@@ -578,7 +578,7 @@
         ${deal && deal.reopen_count && !locked ? `<div class="notice">这一单撤回重改过${deal.reopen_count > 1 ? ' ' + deal.reopen_count + ' 次' : ''}${deal.reopen_note ? '，原因：' + esc(deal.reopen_note) : ''}。改好后保存，业务员要重新确认。</div>` : ''}
         ${deal && deal.status === 'confirming' ? '<div class="notice">业务员们正在确认这一单。现在改的话，大家要重新确认。</div>' : ''}
         ${deal && deal.status !== 'draft' ? `<div class="card stack" style="gap:6px"><h3>业务员确认情况</h3>
-          ${p.who.map((n) => { const c = p.cm[n]; return `<div class="row between"><span>${esc(n)}</span>${c && c.status === 'ok' ? '<span class="pill ok">已确认</span>' : '<span class="pill gray">还没确认</span>'}</div>`; }).join('')}</div>` : ''}
+          ${p.who.map((n) => { const c = p.cm[n]; return `<div class="row between"><span>${esc(n)}</span>${state.agents.some((a) => a.name === n && a.auto_confirm) ? '<span class="pill ok">自动确认</span>' : c && c.status === 'ok' ? '<span class="pill ok">已确认</span>' : '<span class="pill gray">还没确认</span>'}</div>`; }).join('')}</div>` : ''}
         <div class="stack" id="manual-box" style="gap:6px;padding:6px 12px;border:1px dashed #d9b45a;border-radius:10px">
           <label class="row small" style="gap:6px;flex-wrap:nowrap;align-items:center;cursor:pointer"><input type="checkbox" id="m-on" ${d.manual ? 'checked' : ''} ${dis} style="width:18px;height:18px;min-height:0;flex:none;padding:0;margin:0"><span>疑难单（自己填每人拿多少）</span></label>
           <div class="small muted" id="m-tip" ${d.manual ? '' : 'hidden'}>下面照常填。总账和 10% 自动算，最下面“这一单怎么分”里填每个人拿多少，剩下归店面。</div>
@@ -1125,9 +1125,15 @@
   const CATS = ['小户', '小户带阁楼', '中户', '中户带阁楼', '大户', '大户带阁楼', '特大户', '特大户带阁楼', '商品房', '商铺'];
   const zones = (name, n) => Array.from({ length: n }, (_, i) => `${name}${'一二三四五六七八九'[i]}区`);
   const COMMUNITIES = ['东亭家园', '厦亭家园', ...zones('怡邻花园', 5), '悬珠花园', '阳澄人家', '亭南新村', ...zones('青苑新村', 6), ...zones('畅苑新村', 4), '青灯新村', '亭苑', '金陵花园', '绿地', '融锦苑', '雍合湾', '唯锦苑', '唯亭苑'];
+  // 复制文字：新手机直接复制；不行就用老办法
+  const copyText = async (t) => {
+    try { await navigator.clipboard.writeText(t); return true; } catch (e) {
+      const ta = document.createElement('textarea'); ta.value = t; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;opacity:0'; document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch (e2) { ok = false; } ta.remove(); return ok; }
+  };
   const layoutText = (x) => x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
   const cardSpec = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : ''].filter(Boolean).map(esc).join(' · ') || '还没填户型';  // 列表卡片只放最简单的
-  const specLine = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : '', x.decoration, x.elevator ? '有电梯' : '没电梯'].filter(Boolean).map(esc).join(' · ');
+  const specLine = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : '', x.decoration, x.elevator ? '有电梯' : '没电梯', x.school === '有' ? '学区房' : '', x.years].filter(Boolean).map(esc).join(' · ');
   const LF0 = { kind: '', status: 'active', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
   const matchListing = (x, F, noStatus) => {
     const kw = (F.q || '').trim();
@@ -1235,7 +1241,19 @@
     let agentsLocked = !!(src && src.agents && src.agents.length);
     const chipsHTML = () => agentsLocked ? `<b style="font-size:18px">${esc(x.agents.join('、'))}</b>` : names.map((n) => `<button type="button" class="chip" data-ag="${esc(n)}" aria-pressed="${x.agents.includes(n)}">${esc(n)}</button>`).join('');
     const sheet = openSheet(`<div class="wrap stack">
-        <h2>${src ? '房源' : '录入新房源'}</h2>
+        <div class="row between"><h2>${src ? '房源' : '录入新房源'}</h2>${src ? '<button type="button" id="l-export">📋 复制成文字</button>' : ''}</div>
+        ${src ? '<div id="l-export-box" class="card stack" style="gap:6px" hidden></div>' : `<details class="card" id="l-import"><summary><b>📋 粘贴房源群里的文字，一键识别</b></summary>
+          <div class="stack" style="gap:8px;margin-top:8px"><textarea id="l-import-t" rows="6" placeholder="坐落：…
+价格：…
+面积：…
+户型：…
+装修：…
+学区：…
+年限：…
+房东：…
+维护：…
+备注：…"></textarea>
+          <button type="button" class="btn-primary" id="l-import-go">识别，填到下面</button><div id="l-import-r" class="small"></div></div></details>`}
         ${x.needs_info ? `<div class="notice">这套是记账时自动建的，户型、面积这些还没填。房源维护人（${esc(x.agents.join('、') || '还没选')}）的后台会提示他们补全，谁先补完算谁的。你在这里直接填好保存也行。</div>`
           : x.filled_by ? `<div class="small muted">记账时自动建的，${esc(x.filled_by)} 补全了详细信息</div>` : ''}
         <div class="card stack" id="ph-box" style="gap:8px"></div>
@@ -1251,6 +1269,9 @@
             <label class="field grow" style="min-width:0">几厅<select id="l-halls"><option value="">—</option>${nopt(5, x.halls, '厅')}</select></label></div>
           <div class="row" style="flex-wrap:nowrap">${inp('l-area', '面积（㎡）', x.area, '例如：118', 'inputmode="decimal"')}
             <label class="field grow" style="min-width:0">装修<select id="l-deco"><option value="">—</option>${opt(['毛坯', '简装', '精装', '豪装'], x.decoration)}</select></label></div>
+          <div class="row" style="flex-wrap:nowrap">
+            <label class="field grow" style="min-width:0">学区<select id="l-school"><option value="">—</option>${opt(['有', '无'], x.school)}</select></label>
+            <label class="field grow" style="min-width:0">年限<select id="l-years"><option value="">—</option>${opt([...new Set(['不满2', '满2', '满5', ...(x.years ? [x.years] : [])])], x.years)}</select></label></div>
           <div class="field"><span>电梯</span><div class="seg" role="group" aria-label="有没有电梯" style="grid-template-columns:repeat(2,1fr)">${[[true, '有电梯'], [false, '没电梯']].map(([v, t]) => `<button type="button" data-elev="${v}" aria-pressed="${!!x.elevator === v}">${t}</button>`).join('')}</div></div>
           ${inp('l-price', `<span id="l-plabel">${x.kind === '出租' ? '月租（元）' : '总价（万元）'}</span>`, x.price, x.kind === '出租' ? '例如：2600' : '例如：168', 'inputmode="decimal"')}
         </div>
@@ -1289,6 +1310,37 @@
     $('#l-comm', sheet).oninput = showDup; $('#l-unit', sheet).oninput = showDup;
     const shop = () => { $('#l-rh', sheet).hidden = $('#l-cat', sheet).value === '商铺'; };
     $('#l-cat', sheet).onchange = shop; shop();
+    // 一键导出：生成房源群里那段文字，复制
+    if ($('#l-export', sheet)) $('#l-export', sheet).onclick = async () => {
+      const t = U.listingText({ ...src, agents: src.agents || [] }), box = $('#l-export-box', sheet);
+      const ok = await copyText(t); box.hidden = false;
+      box.innerHTML = `<div class="small">${ok ? '✓ 已复制，去微信房源群里长按粘贴就行' : '手机不让自动复制，请长按下面的文字全选复制'}</div><textarea rows="9" readonly>${esc(t)}</textarea>`;
+    };
+    // 一键导入：把房源群里的文字认出来填进表格
+    if ($('#l-import-go', sheet)) $('#l-import-go', sheet).onclick = () => {
+      const known = [...COMMUNITIES, ...extra];
+      const { x: y, got, miss } = U.parseListingText($('#l-import-t', sheet).value, known, state.agents.filter((a) => a.active).map((a) => a.name));
+      if (!got.length) { $('#l-import-r', sheet).textContent = '没认出来，请按“坐落：… 价格：…”一行一项的格式粘贴'; return; }
+      if (y.kind !== x.kind) sheet.querySelector(`[data-kind="${y.kind}"]`).click();
+      if (y.community) {
+        if (known.includes(y.community)) { $('#l-comm-sel', sheet).value = y.community; $('#l-comm', sheet).hidden = true; }
+        else { $('#l-comm-sel', sheet).value = '__other'; $('#l-comm', sheet).hidden = false; $('#l-comm', sheet).value = y.community; }
+      }
+      if (y.unit != null) $('#l-unit', sheet).value = y.unit;
+      if (y.category) { $('#l-cat', sheet).value = y.category; shop(); }
+      if (y.rooms != null) { $('#l-rooms', sheet).value = String(y.rooms); $('#l-halls', sheet).value = String(y.halls || 0); }
+      if (y.area != null) $('#l-area', sheet).value = y.area;
+      if (y.decoration) $('#l-deco', sheet).value = y.decoration;
+      if (y.school) { const el = $('#l-school', sheet); if (![...el.options].some((o) => o.value === y.school)) el.add(new Option(y.school, y.school)); el.value = y.school; }
+      if (y.years) { const el = $('#l-years', sheet); if (![...el.options].some((o) => o.value === y.years)) el.add(new Option(y.years, y.years)); el.value = y.years; }
+      if (y.elevator != null) sheet.querySelector(`[data-elev="${!!y.elevator}"]`).click();
+      if (y.price != null) $('#l-price', sheet).value = y.price;
+      if (y.owners.length) { $('#olines', sheet).innerHTML = y.owners.map(oline).join(''); }
+      if (y.agents.length && !agentsLocked) { x.agents = y.agents.slice(); $('#ag-chips', sheet).innerHTML = chipsHTML(); }
+      if (y.note) $('#l-note', sheet).value = y.note;
+      showDup();
+      $('#l-import-r', sheet).innerHTML = `✓ 认出了：${got.join('、')}。请往下核对一遍再保存。${miss.length ? '<br><span style="color:#c0392b">' + miss.map(esc).join('<br>') + '</span>' : ''}`;
+    };
     sheet.querySelectorAll('[data-elev]').forEach((b) => b.onclick = () => { x.elevator = b.dataset.elev === 'true'; sheet.querySelectorAll('[data-elev]').forEach((y) => y.setAttribute('aria-pressed', y === b)); });
     if ($('#ag-unlock', sheet)) $('#ag-unlock', sheet).onclick = (e) => {
       agentsLocked = false; $('#ag-chips', sheet).innerHTML = chipsHTML(); e.target.remove();
@@ -1299,7 +1351,7 @@
       Object.assign(x, {
         community: commVal(), unit: $('#l-unit', sheet).value.trim(), category: $('#l-cat', sheet).value,
         rooms: isShop ? null : int($('#l-rooms', sheet).value), halls: isShop ? null : int($('#l-halls', sheet).value),
-        area: num($('#l-area', sheet).value), decoration: $('#l-deco', sheet).value,
+        area: num($('#l-area', sheet).value), decoration: $('#l-deco', sheet).value, school: $('#l-school', sheet).value, years: $('#l-years', sheet).value,
         price: num($('#l-price', sheet).value), status: $('#l-status', sheet).value, note: $('#l-note', sheet).value.trim(),
         owners: [...sheet.querySelectorAll('#olines .oline')].map((ln) => ({ name: ln.querySelector('[data-on]').value.trim(), phone: ln.querySelector('[data-op]').value.trim() })).filter((o) => o.name || o.phone) });
       x.layout = layoutText(x);

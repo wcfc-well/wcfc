@@ -70,9 +70,14 @@
   const CATS = ['小户', '小户带阁楼', '中户', '中户带阁楼', '大户', '大户带阁楼', '特大户', '特大户带阁楼', '商品房', '商铺'];
   const zones = (name, n) => Array.from({ length: n }, (_, i) => `${name}${'一二三四五六七八九'[i]}区`);
   const COMMUNITIES = ['东亭家园', '厦亭家园', ...zones('怡邻花园', 5), '悬珠花园', '阳澄人家', '亭南新村', ...zones('青苑新村', 6), ...zones('畅苑新村', 4), '青灯新村', '亭苑', '金陵花园', '绿地', '融锦苑', '雍合湾', '唯锦苑', '唯亭苑'];
+  const copyText = async (t) => {
+    try { await navigator.clipboard.writeText(t); return true; } catch (e) {
+      const ta = document.createElement('textarea'); ta.value = t; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;opacity:0'; document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch (e2) { ok = false; } ta.remove(); return ok; }
+  };
   const layoutText = (x) => x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
   const cardSpec = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : ''].filter(Boolean).map(esc).join(' · ') || '还没填户型';  // 列表卡片只放最简单的
-  const specLine = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : '', x.decoration, x.elevator ? '有电梯' : '没电梯'].filter(Boolean).map(esc).join(' · ');
+  const specLine = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : '', x.decoration, x.elevator ? '有电梯' : '没电梯', x.school === '有' ? '学区房' : '', x.years].filter(Boolean).map(esc).join(' · ');
   const LF0 = { kind: '', status: 'active', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
   const matchListing = (x, F, noStatus) => {
     const kw = (F.q || '').trim();
@@ -184,6 +189,18 @@
       <button id="back" style="align-self:flex-start">‹ ${isNew ? '回到房源列表' : '不改了，返回'}</button>
       <h2 style="margin:0">${isNew ? '录入新房源' : `修改房子信息：${esc(x.community)} ${esc(x.unit)}`}</h2>
       ${x.needs_info ? '<div class="notice">这套是店里记账时自动建的，请把户型、面积这些补上。</div>' : ''}
+      ${isNew ? `<details class="card" id="e-import"><summary><b>📋 粘贴房源群里的文字，一键识别</b></summary>
+        <div class="stack" style="gap:8px;margin-top:8px"><textarea id="e-import-t" rows="6" placeholder="坐落：…
+价格：…
+面积：…
+户型：…
+装修：…
+学区：…
+年限：…
+房东：…
+维护：…
+备注：…"></textarea>
+        <button type="button" class="btn-primary" id="e-import-go">识别，填到下面</button><div id="e-import-r" class="small"></div></div></details>` : ''}
       <div class="card stack" id="ph-box" style="gap:8px"></div>
       <div class="card stack">
         <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
@@ -198,6 +215,9 @@
         <div class="row" style="flex-wrap:nowrap">
           <label class="field grow" style="min-width:0">面积（㎡）<input id="e-area" inputmode="decimal" value="${esc(x.area == null ? '' : x.area)}" placeholder="例如：118"></label>
           <label class="field grow" style="min-width:0">装修<select id="e-deco"><option value="">—</option>${opt(['毛坯', '简装', '精装', '豪装'], x.decoration)}</select></label></div>
+        <div class="row" style="flex-wrap:nowrap">
+          <label class="field grow" style="min-width:0">学区<select id="e-school"><option value="">—</option>${opt(['有', '无'], x.school)}</select></label>
+          <label class="field grow" style="min-width:0">年限<select id="e-years"><option value="">—</option>${opt([...new Set(['不满2', '满2', '满5', ...(x.years ? [x.years] : [])])], x.years)}</select></label></div>
         <div class="field"><span>电梯</span><div class="seg" style="grid-template-columns:repeat(2,1fr)"><button type="button" data-ev="1" aria-pressed="${!!x.elevator}">有电梯</button><button type="button" data-ev="0" aria-pressed="${!x.elevator}">没电梯</button></div></div>
         <label class="field"><span id="e-plabel">${x.kind === '出租' ? '月租（元）' : '总价（万元）'}</span><input id="e-price" inputmode="decimal" value="${esc(x.price == null ? '' : x.price)}" placeholder="例如：168"></label>
       </div>
@@ -207,7 +227,7 @@
           : `<div class="stack" style="gap:8px">${(x.owners || []).map(oview).join('') || '<span class="muted">没写</span>'}</div><div class="small muted">房东信息只有房源维护人和店面能改。</div>`}</div>
       <div class="card stack" style="gap:6px"><span class="small muted">房源维护人</span>
         ${isNew ? `<div class="small muted">默认是您自己。和别人一起负责的话，把他们也点上。保存以后就定下来了，要换人只能找店面改。</div>
-          <div class="chips">${names.map((n) => `<button type="button" class="chip" data-ag="${esc(n)}" aria-pressed="${x.agents.includes(n)}">${esc(n)}</button>`).join('')}</div>`
+          <div class="chips" id="e-chips">${names.map((n) => `<button type="button" class="chip" data-ag="${esc(n)}" aria-pressed="${x.agents.includes(n)}">${esc(n)}</button>`).join('')}</div>`
           : `<b style="font-size:18px">${esc((x.agents || []).join('、') || '—')}</b><div class="small muted">维护人不能在这里改，要换人请找店面。</div>`}</div>
       ${isNew ? '<label class="field">备注<textarea id="e-note" rows="2" placeholder="例如：满五唯一、钥匙在店里、随时看房"></textarea></label>' : ''}
       <div id="err" class="notice err" hidden></div>
@@ -228,6 +248,30 @@
     app.querySelectorAll('[data-ag]').forEach((b) => b.onclick = () => { const n = b.dataset.ag, i = x.agents.indexOf(n); if (i >= 0) x.agents.splice(i, 1); else x.agents.push(n); b.setAttribute('aria-pressed', i < 0); });
     if (canOwner) $('#oadd').onclick = () => $('#olines').insertAdjacentHTML('beforeend', oline(null));
     if (canOwner) $('#olines').onclick = (e) => { const d = e.target.closest('[data-odel]'); if (!d) return; const ls = app.querySelectorAll('#olines .oline'); if (ls.length > 1) d.closest('.oline').remove(); else d.closest('.oline').querySelectorAll('input').forEach((i) => { i.value = ''; }); };
+    if ($('#e-import-go')) $('#e-import-go').onclick = () => {
+      const known = [...COMMUNITIES, ...extra];
+      const { x: y, got, miss } = window.StoreUtil.parseListingText($('#e-import-t').value, known, names);
+      if (!got.length) { $('#e-import-r').textContent = '没认出来，请按“坐落：… 价格：…”一行一项的格式粘贴'; return; }
+      if (y.kind !== x.kind) app.querySelector(`[data-kind="${y.kind}"]`).click();
+      if (y.community) {
+        if (known.includes(y.community)) { $('#e-comm-sel').value = y.community; $('#e-comm').hidden = true; }
+        else { $('#e-comm-sel').value = '__other'; $('#e-comm').hidden = false; $('#e-comm').value = y.community; }
+      }
+      if (y.unit != null) $('#e-unit').value = y.unit;
+      if (y.category) { $('#e-cat').value = y.category; $('#e-rh').hidden = y.category === '商铺'; }
+      if (y.rooms != null) { $('#e-rooms').value = String(y.rooms); $('#e-halls').value = String(y.halls || 0); }
+      if (y.area != null) $('#e-area').value = y.area;
+      if (y.decoration) $('#e-deco').value = y.decoration;
+      if (y.school) { const el = $('#e-school'); if (![...el.options].some((o) => o.value === y.school)) el.add(new Option(y.school, y.school)); el.value = y.school; }
+      if (y.years) { const el = $('#e-years'); if (![...el.options].some((o) => o.value === y.years)) el.add(new Option(y.years, y.years)); el.value = y.years; }
+      if (y.elevator != null) app.querySelector(`[data-ev="${y.elevator ? 1 : 0}"]`).click();
+      if (y.price != null) $('#e-price').value = y.price;
+      if (y.owners.length && canOwner) $('#olines').innerHTML = y.owners.map(oline).join('');
+      if (y.agents.length) { x.agents = y.agents.slice(); app.querySelectorAll('#e-chips [data-ag]').forEach((b) => b.setAttribute('aria-pressed', x.agents.includes(b.dataset.ag))); }
+      if (y.note && $('#e-note')) $('#e-note').value = y.note;
+      dup();
+      $('#e-import-r').innerHTML = `✓ 认出了：${got.join('、')}。请往下核对一遍再保存。${miss.length ? '<br><span style="color:#c0392b">' + miss.map(esc).join('<br>') + '</span>' : ''}`;
+    };
     $('#e-save').onclick = async () => {
       const num = (v) => String(v).replace(/[^\d.]/g, '');
       if (!commVal()) return err('请选小区（不在列表里就选第一个“其他”，自己填）');
@@ -236,7 +280,7 @@
       if (isNew && !x.agents.length) return err('请至少选一个房源维护人');
       const shop = $('#e-cat').value === '商铺';
       const p = { kind: x.kind, community: commVal(), unit: $('#e-unit').value.trim(), category: $('#e-cat').value, rooms: shop ? '' : $('#e-rooms').value, halls: shop ? '' : $('#e-halls').value,
-        area: num($('#e-area').value), decoration: $('#e-deco').value, elevator: !!x.elevator, price: num($('#e-price').value),
+        area: num($('#e-area').value), decoration: $('#e-deco').value, school: $('#e-school').value, years: $('#e-years').value, elevator: !!x.elevator, price: num($('#e-price').value),
         owners: canOwner ? [...app.querySelectorAll('#olines .oline')].map((o) => ({ name: o.querySelector('[data-on]').value.trim(), phone: o.querySelector('[data-op]').value.trim() })).filter((o) => o.name || o.phone) : x.owners || [] };
       if (isNew) { p.agents = x.agents; p.note = $('#e-note').value.trim(); }
       const pc = phField.changed(); if (pc !== undefined) { p.photo = pc ? pc.photo : ''; p.photo_thumb = pc ? pc.photo_thumb : ''; }
@@ -253,9 +297,10 @@
         <div class="row" style="gap:10px;flex-wrap:nowrap"><span class="tc ${x.kind === '出租' ? 'tt-b' : 'tt-a'}">${x.kind}</span><h2 class="grow" style="margin:0">${esc(x.community)} ${esc(x.unit)}</h2></div>
         ${x.photo_thumb ? `<img class="ph-prev" id="l-photo" src="${x.photo_thumb}" alt="房子照片，点开放大">` : ''}
         ${x.deal_price != null ? `<div class="sold-line">${x.kind === '出租' ? '已租' : '已售'}，成交价 <b class="num">${Number(x.deal_price).toLocaleString()} ${x.kind === '出租' ? '元/月' : '万'}</b></div>` : ''}
-        <div class="kv"><span>房源维护人</span><span>${esc((x.agents || []).join('、') || '—')}</span><span>户型分类</span><span>${esc(x.category || '—')}</span><span>几室几厅</span><span>${esc(layoutText(x) || '—')}</span><span>电梯</span><span>${x.elevator ? '有电梯' : '没电梯'}</span><span>面积</span><span>${x.area ? esc(x.area) + '㎡' : '—'}</span><span>装修</span><span>${esc(x.decoration || '—')}</span>
+        <div class="kv"><span>房源维护人</span><span>${esc((x.agents || []).join('、') || '—')}</span><span>户型分类</span><span>${esc(x.category || '—')}</span><span>几室几厅</span><span>${esc(layoutText(x) || '—')}</span><span>电梯</span><span>${x.elevator ? '有电梯' : '没电梯'}</span><span>面积</span><span>${x.area ? esc(x.area) + '㎡' : '—'}</span><span>装修</span><span>${esc(x.decoration || '—')}</span><span>学区</span><span>${esc(x.school || '—')}</span><span>年限</span><span>${esc(x.years || '—')}</span>
           <span>${x.kind === '出租' ? '月租' : '总价'}</span><span class="num"><b>${priceText(x)}</b></span><span>房东</span><span>${(x.owners || []).length ? x.owners.map(telLink).join('<br>') : '—'}</span></div>
-        <button id="l-edit">修改房子信息</button>
+        <div class="row" style="gap:8px"><button id="l-edit" class="grow">修改房子信息</button><button id="l-export" class="grow">📋 复制成文字</button></div>
+        <div id="l-export-box" class="stack" style="gap:6px" hidden></div>
         ${x.updated_by || x.created_by ? `<div class="small muted">${x.created_by ? esc(x.created_by) + ' 录入' : ''}${x.updated_by && x.updated_by !== x.created_by ? '，' + esc(x.updated_by) + ' 最后修改' : ''}</div>` : ''}
       </div>
       <div class="card stack"><h3>备注</h3>
@@ -273,6 +318,11 @@
     $('#back').onclick = () => listings();
     if ($('#l-photo')) $('#l-photo').onclick = () => Photo.show(S.auntListingPhoto(x.id));
     $('#l-edit').onclick = async () => editListing(x, all || await S.auntListings());
+    // 一键导出：生成房源群里那段文字，复制好直接去群里粘贴
+    $('#l-export').onclick = async () => {
+      const t = window.StoreUtil.listingText(x), ok = await copyText(t), box = $('#l-export-box'); box.hidden = false;
+      box.innerHTML = `<div class="small">${ok ? '✓ 已复制，去微信房源群里长按粘贴就行' : '手机不让自动复制，请长按下面的文字全选复制'}</div><textarea rows="9" readonly>${esc(t)}</textarea>`;
+    };
     $('#note-save').onclick = async () => { try { await S.auntListingNote(x.id, $('#note').value.trim()); await reopen(); } catch (e) { err(e.message); } };
     $('#fb-add').onclick = async () => { const t = $('#fb').value.trim(); if (!t) return err('请先写反馈内容'); try { await S.auntListingFeedback(x.id, t); await reopen(); } catch (e) { err(e.message); } };
   }

@@ -107,6 +107,7 @@
       async saveAgent(a) {
         if (db.agents.some((x) => x.name === a.name && x.id !== a.id)) return fail('名字重复了');
         if (a.id) Object.assign(db.agents.find((x) => x.id === a.id), { name: a.name, phone4: a.phone4, active: a.active, auto_confirm: !!a.auto_confirm });
+        if (a.auto_confirm) db.deals.filter((d) => d.status === 'confirming').forEach(maybeLock);  // 后来设成自动确认：以前等确认的单子也替 TA 确认
         else db.agents.push({ name: a.name, phone4: a.phone4 || '', id: ++db.seq, device_token: null, sort: db.agents.length, active: true });
         save(); return true;
       },
@@ -218,7 +219,7 @@
         const dup = db.listings.find((y) => y.id !== id && houseKey(y) === houseKey(x));
         if (dup) return fail('系统里已经有这套房子了，不能重复录入');
         const num = (v) => v === '' || v == null ? null : Number(v);
-        const d = { kind: x.kind, community: x.community, unit: x.unit, category: x.category || '', rooms: num(x.rooms), halls: num(x.halls), area: num(x.area), price: num(x.price), elevator: !!x.elevator, decoration: x.decoration || '', owners: x.owners || [], updated_by: a.name };
+        const d = { kind: x.kind, community: x.community, unit: x.unit, category: x.category || '', rooms: num(x.rooms), halls: num(x.halls), area: num(x.area), price: num(x.price), elevator: !!x.elevator, decoration: x.decoration || '', school: x.school || '', years: x.years || '', owners: x.owners || [], updated_by: a.name };
         if (!id) {
           const names = db.agents.filter((g) => g.active).map((g) => g.name);
           const ags = (x.agents || []).filter((n) => names.includes(n));
@@ -349,7 +350,99 @@
     throw new Error('supabase not loaded');
   }
   window.Store = CLOUD ? cloudStore() : demoStore();
-  window.StoreUtil = { involves, participants, people, STAFF, houseKey, unitKey, dealKey, dupDeal, DUP_DAYS };
+
+  // ---------- 2026-11-16：房源 ⇄ 房源群里那段文字（一键导出、一键导入） ----------
+  const CATS_ALL = ['特大户带阁楼', '大户带阁楼', '中户带阁楼', '小户带阁楼', '特大户', '大户', '中户', '小户', '商品房', '商铺'];
+  const DECOS = ['毛坯', '简装', '精装', '豪装'];
+  const cnNum = (s) => String(s || '').replace(/[一二三四五六七八九十]/g, (c) => '一二三四五六七八九'.indexOf(c) + 1 || 10);
+  // 小区名字比较时去掉“新村/花园/家园/小区”、空格，汉字数字换成阿拉伯数字：畅苑三区 = 畅苑新村三区
+  const commKey = (s) => cnNum(String(s || '').replace(/\s|新村|花园|家园|小区|社区/g, ''));
+  const listingText = (x) => {
+    const lay = x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
+    const price = x.price == null || x.price === '' ? '' : x.kind === '出租' ? `${x.price}元/月` : `${x.price}万`;
+    const lines = [
+      ['坐落', `${x.community || ''}${x.unit || ''}`],
+      [x.kind === '出租' ? '租金' : '价格', price],
+      ['面积', x.area ? `${x.area}平` : ''],
+      ['户型', [x.category, lay].filter(Boolean).join(' ')],
+      ['装修', x.decoration], ['电梯', x.elevator ? '有' : ''],
+      ['学区', x.school], ['年限', x.years],
+      ['房东', (x.owners || []).map((o) => [o.phone, o.name].filter(Boolean).join('')).filter(Boolean).join('，')],
+      ['维护', (x.agents || []).join(' ')],
+      ['备注', x.note],
+    ];
+    return lines.filter(([, v]) => v).map(([k, v]) => `${k}：${v}`).join('\n');
+  };
+  // 把房源群里的一段文字认成房源。communities：认识的小区；staff：业务员名字（认“安姐、小朱、石”）
+  const parseListingText = (text, communities, staff) => {
+    const x = { kind: '出售', owners: [], agents: [] }, got = [], miss = [], extraNote = [];
+    const pick = {};
+    String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).forEach((line) => {
+      const m = line.match(/^([一-龥]{2,4})\s*[:：]\s*(.*)$/);
+      if (!m) { extraNote.push(line); return; }
+      pick[m[1]] = (pick[m[1]] ? pick[m[1]] + ' ' : '') + m[2].trim();
+    });
+    const take = (...ks) => { for (const k of ks) if (pick[k] != null) { const v = pick[k]; delete pick[k]; return v; } return null; };
+    const addr = take('坐落', '地址', '房源', '小区');
+    if (addr) {
+      const i = addr.search(/\d/);
+      const name = (i < 0 ? addr : addr.slice(0, i)).replace(/[\s,，、]+$/, '').trim();
+      x.unit = i < 0 ? '' : addr.slice(i).trim();
+      const k = commKey(name);
+      const hit = k && (communities.find((c) => commKey(c) === k) || communities.find((c) => commKey(c).startsWith(k) || k.startsWith(commKey(c))));
+      x.community = hit || name; x.commKnown = !!hit;
+      got.push('坐落'); if (!hit && name) miss.push(`小区“${name}”不在列表里，已放进“其他”`);
+    }
+    const price = take('价格', '售价', '总价', '租金', '月租');
+    if (price) {
+      const n = (price.match(/\d+(\.\d+)?/) || [])[0];
+      if (/租|月|元/.test(price) && !/万/.test(price)) x.kind = '出租';
+      if (n) { x.price = Number(n); got.push('价格'); }
+    }
+    const area = take('面积');
+    if (area) { const n = (area.match(/\d+(\.\d+)?/) || [])[0]; if (n) { x.area = Number(n); got.push('面积'); } }
+    const cat = take('户型', '房型');
+    if (cat) {
+      const c = CATS_ALL.find((t) => cat.includes(t)); if (c) x.category = c;
+      const r = cat.match(/(\d|[一二三四五六七])\s*室\s*(?:(\d|[一二三四五六七])\s*厅)?/);
+      if (r) { x.rooms = Number(cnNum(r[1])); x.halls = r[2] ? Number(cnNum(r[2])) : 0; }
+      if (c || r) got.push('户型'); else extraNote.push('户型：' + cat);
+    }
+    const deco = take('装修');
+    if (deco) { const d = DECOS.find((t) => deco.includes(t)); if (d) { x.decoration = d; got.push('装修'); } const rest = deco.replace(d || '', '').trim(); if (rest) extraNote.push('装修：' + rest); }
+    const elev = take('电梯');
+    if (elev) { x.elevator = /有|是|带/.test(elev) && !/无|没/.test(elev); got.push('电梯'); }
+    const school = take('学区');
+    if (school) { x.school = /无|没|否/.test(school) ? '无' : /有|是/.test(school) ? '有' : school; got.push('学区'); }
+    const years = take('年限', '产证', '满几年');
+    if (years) { x.years = years.replace(/\s/g, '').replace(/年/g, ''); got.push('年限'); }
+    const owner = take('房东', '业主', '联系');
+    if (owner) {
+      const phones = owner.match(/1\d{10}|\d{7,8}/g) || [];
+      const name = owner.replace(/1\d{10}|\d{7,8}/g, ' ').replace(/[,，、;；/]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+      if (phones.length) phones.forEach((p, i) => x.owners.push({ name: name[i] || (i === 0 ? name.join('') : ''), phone: p }));
+      else if (name.length) x.owners.push({ name: name.join(' '), phone: '' });
+      got.push('房东');
+    }
+    const keep = take('维护', '维护人', '业务员', '负责');
+    if (keep) {
+      keep.split(/[\s,，、/和&]+/).filter(Boolean).forEach((t) => {
+        const exact = staff.find((n) => n === t);
+        const core = t.replace(/^[小老阿]/, '').replace(/[姐哥总妹弟]$/, '');
+        const cand = exact ? [exact] : core ? staff.filter((n) => n[0] === core[0] && (core.length === 1 || n.includes(core))) : [];
+        const byGiven = !cand.length && core ? staff.filter((n) => n.slice(1).includes(core)) : [];
+        const c = cand.length ? cand : byGiven;
+        if (c.length === 1) { if (!x.agents.includes(c[0])) x.agents.push(c[0]); } else miss.push(`维护人“${t}”${c.length ? '对上好几个人' : '没认出来'}，请手动点`);
+      });
+      if (x.agents.length) got.push('维护人');
+    }
+    const note = take('备注', '说明', '其他');
+    Object.entries(pick).forEach(([k, v]) => extraNote.push(`${k}：${v}`));
+    x.note = [note, ...extraNote].filter(Boolean).join('；');
+    if (x.note) got.push('备注');
+    return { x, got, miss };
+  };
+  window.StoreUtil = { listingText, parseListingText, commKey, involves, participants, people, STAFF, houseKey, unitKey, dealKey, dupDeal, DUP_DAYS };
 
   // 房源照片：手机选一张，压缩成大图（最长 1280）和小图（最长 320），都是 jpg
   function resizeTo(img, max, q) {

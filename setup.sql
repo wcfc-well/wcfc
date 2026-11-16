@@ -794,3 +794,70 @@ begin
   insert into app_migrations (name) values ('accountant_fee_revert');
   raise notice '删掉会计费支出的单子：% 单', n;
 end $$;
+
+-- ---------- 2026-11-16：后来才设成“自动确认”的人，以前还在等确认的单子也替 TA 确认 ----------
+create or replace function agents_auto_confirm_backfill() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.auto_confirm and not coalesce(old.auto_confirm, false) then
+    insert into confirmations (deal_id, agent_name, status, note, at)
+      select d.id, new.name, 'ok', '自动确认', now() from deals d
+       where d.status = 'confirming' and new.name = any(deal_people(d))
+    on conflict (deal_id, agent_name) do update set status = 'ok', note = '自动确认', at = now();
+  end if;
+  return null;
+end $$;
+drop trigger if exists trg_agents_auto_confirm on agents;
+create trigger trg_agents_auto_confirm after update of auto_confirm on agents for each row execute function agents_auto_confirm_backfill();
+-- 现在已经是自动确认的人，补一遍（可以重复跑）
+insert into confirmations (deal_id, agent_name, status, note, at)
+  select d.id, a.name, 'ok', '自动确认', now() from deals d join agents a on a.auto_confirm and a.name = any(deal_people(d))
+   where d.status = 'confirming'
+on conflict (deal_id, agent_name) do update set status = 'ok', note = '自动确认', at = now();
+
+-- ---------- 2026-11-16：房源加“学区”“年限”（房源群里一直有写），业务员录入/修改也能填 ----------
+alter table listings add column if not exists school text not null default '';   -- 学区：有 / 无
+alter table listings add column if not exists years text not null default '';    -- 年限：不满2 / 满2 / 满5
+create or replace function aunt_listing_save(p_token text, p_id bigint, p jsonb) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare a agents; l listings; ags text[]; new_id bigint;
+begin
+  select * into a from agents where device_token = p_token and active;
+  if not found then raise exception '请重新登记'; end if;
+  if coalesce(trim(p->>'community'), '') = '' then raise exception '请选小区'; end if;
+  if coalesce(trim(p->>'unit'), '') = '' then raise exception '请填坐落'; end if;
+  if coalesce(p->>'kind', '') not in ('出售', '出租') then raise exception '请选出售还是出租'; end if;
+  begin
+    if p_id is null then
+      select coalesce(array_agg(x), '{}') into ags from jsonb_array_elements_text(coalesce(p->'agents', '[]')) x where x in (select name from agents where active);
+      if cardinality(ags) = 0 then ags := array[a.name]; end if;
+      insert into listings (kind, community, unit, category, rooms, halls, area, price, elevator, decoration, school, years, owners, agents, status, note, note_by, note_at, note_log, created_by, updated_by)
+      values (p->>'kind', trim(p->>'community'), trim(p->>'unit'), coalesce(p->>'category', ''),
+        nullif(p->>'rooms', '')::int, nullif(p->>'halls', '')::int, nullif(p->>'area', '')::numeric, nullif(p->>'price', '')::numeric,
+        coalesce((p->>'elevator')::boolean, false), coalesce(p->>'decoration', ''), coalesce(p->>'school', ''), coalesce(p->>'years', ''),
+        case when jsonb_typeof(p->'owners') = 'array' then p->'owners' else '[]' end, ags, 'active',
+        coalesce(p->>'note', ''), case when coalesce(p->>'note', '') <> '' then a.name else '' end, case when coalesce(p->>'note', '') <> '' then now() end,
+        case when coalesce(p->>'note', '') <> '' then jsonb_build_array(jsonb_build_object('by', a.name, 'at', now(), 'note', p->>'note')) else '[]' end,
+        a.name, a.name)
+      returning id into new_id;
+      if p ? 'photo' then perform listing_set_photo(new_id, p); end if;
+      return new_id;
+    end if;
+    select * into l from listings where id = p_id for update;
+    if not found then raise exception '找不到这套房源'; end if;
+    update listings set kind = p->>'kind', community = trim(p->>'community'), unit = trim(p->>'unit'),
+      category = coalesce(p->>'category', ''), rooms = nullif(p->>'rooms', '')::int, halls = nullif(p->>'halls', '')::int,
+      area = nullif(p->>'area', '')::numeric, price = nullif(p->>'price', '')::numeric,
+      elevator = coalesce((p->>'elevator')::boolean, false), decoration = coalesce(p->>'decoration', ''),
+      school = coalesce(p->>'school', school), years = coalesce(p->>'years', years),
+      owners = case when jsonb_typeof(p->'owners') = 'array' and a.name = any(l.agents) then p->'owners' else owners end,  -- 房东信息只有房源维护人（和店面）能改
+      needs_info = l.needs_info and coalesce(p->>'category', '') = '' and nullif(p->>'area', '') is null,
+      filled_by = case when l.needs_info and (coalesce(p->>'category', '') <> '' or nullif(p->>'area', '') is not null) then a.name else filled_by end,
+      filled_at = case when l.needs_info and (coalesce(p->>'category', '') <> '' or nullif(p->>'area', '') is not null) then now() else filled_at end,
+      updated_by = a.name, updated_at = now()
+    where id = p_id;
+    if p ? 'photo' then perform listing_set_photo(p_id, p); end if;
+    return p_id;
+  exception when unique_violation then
+    raise exception '系统里已经有这套房子了，不能重复录入';
+  end;
+end $$;
