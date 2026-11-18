@@ -207,9 +207,9 @@
       <div class="card stack">
         <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
         <div class="seg" role="group" aria-label="住宅还是商铺" style="grid-template-columns:repeat(2,1fr)"><button type="button" data-use="home" aria-pressed="${x.category !== '商铺'}">住宅</button><button type="button" data-use="shop" aria-pressed="${x.category === '商铺'}">🏪 商铺</button></div>
-        <label class="field"><span id="e-comm-l">${x.category === '商铺' ? '小区（商铺不在小区里就不用选）' : '小区'}</span><select id="e-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
+        <label class="field" id="e-comm-box" ${x.category === '商铺' ? 'hidden' : ''}><span id="e-comm-l">小区</span><select id="e-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
         <input id="e-comm" value="${esc(other ? x.community : '')}" placeholder="写小区名字" aria-label="其他小区名字" ${other ? '' : 'hidden'}>
-        <label class="field"><span id="e-unit-l">${x.category === '商铺' ? '位置（商铺）' : '坐落'}</span><input id="e-unit" value="${esc(x.unit)}" placeholder="${x.category === '商铺' ? '随便写，例如：临街18号门面、德林卤菜往东第五家' : 'xx-xx'}"></label>
+        <label class="field"><span id="e-unit-l">坐落</span><input id="e-unit" value="${esc(x.unit)}" placeholder="${x.category === '商铺' ? '写清楚什么路几号，例如：星华街18号门面' : 'xx-xx'}"></label>
         <div id="e-dup" class="notice err" hidden></div><div id="e-sim" class="notice" hidden></div>
         <label class="field">户型分类<select id="e-cat"><option value="">—</option>${opt(CATS, x.category)}</select></label>
         <div class="row" style="flex-wrap:nowrap" id="e-rh" ${x.category === '商铺' ? 'hidden' : ''}>
@@ -239,7 +239,7 @@
     window.scrollTo(0, 0);
     const phField = Photo.field($('#ph-box'), x.photo_thumb, () => S.auntListingPhoto(x.id));
     $('#back').onclick = () => isNew ? listings() : listingDetail(all.find((y) => y.id === x.id), all);
-    const commVal = () => { const v = $('#e-comm-sel').value; return (v === '__other' ? $('#e-comm').value : v).trim(); };
+    const commVal = () => { if ($('#e-cat').value === '商铺') return ''; const v = $('#e-comm-sel').value; return (v === '__other' ? $('#e-comm').value : v).trim(); };
     const key = (c, u) => window.StoreUtil.houseKey({ community: c, unit: u });
     const dup = () => { const k = key(commVal(), $('#e-unit').value); const d = (commVal() || $('#e-cat').value === '商铺') && $('#e-unit').value.trim() && all.find((y) => y.id !== x.id && key(y.community, y.unit) === k);
       const box = $('#e-dup'); box.hidden = !d; if (d) box.textContent = `系统里已经有这套房子了（维护人 ${(d.agents || []).join('、') || '—'}），不能重复录入`; return !!d; };
@@ -247,13 +247,17 @@
     const showSim = () => { const box = $('#e-sim'); const on = $('#e-cat').value === '商铺'; const sim = on && !dup() ? window.StoreUtil.similarShops($('#e-unit').value, all, x.id) : [];
       box.hidden = !sim.length; if (sim.length) box.innerHTML = '这些铺子位置很像，看一下是不是同一个：<br>' + sim.slice(0, 3).map((y) => `${esc(y.community || '')}${esc(y.unit)}（${esc(y.kind)}，维护人 ${esc((y.agents || []).join('、') || '—')}）`).join('<br>'); };
     $('#e-comm').oninput = $('#e-unit').oninput = () => { dup(); showSim(); };
-    // 商铺：坐落没法按 xx-xx 写，改成“位置”随便写；不选几室几厅
+    // 商铺：不选小区，整段地址写在坐落里；不选几室几厅
     const shopUI = () => { const on = $('#e-cat').value === '商铺'; $('#e-rh').hidden = on;
-      $('#e-unit-l').textContent = on ? '位置（商铺）' : '坐落'; $('#e-unit').placeholder = on ? '随便写，例如：临街18号门面、德林卤菜往东第五家' : 'xx-xx';
+      if (on) { const v = $('#e-comm-sel').value, c = (v === '__other' ? $('#e-comm').value : v).trim(), u = $('#e-unit');
+        if (c && !u.value.includes(c)) u.value = c + u.value;  // 原来选了小区的商铺：小区名并进坐落
+        $('#e-comm-sel').value = ''; $('#e-comm').value = ''; $('#e-comm').hidden = true; }
+      $('#e-comm-box').hidden = on; $('#e-unit').placeholder = on ? '写清楚什么路几号，例如：星华街18号门面' : 'xx-xx';
       app.querySelectorAll('[data-use]').forEach((b) => b.setAttribute('aria-pressed', (b.dataset.use === 'shop') === on));
-      $('#e-comm-l').textContent = on ? '小区（商铺不在小区里就不用选）' : '小区'; showSim(); };
+      showSim(); };
     $('#e-cat').onchange = shopUI;
     app.querySelectorAll('[data-use]').forEach((b) => b.onclick = () => { const c = $('#e-cat'); if (b.dataset.use === 'shop') c.value = '商铺'; else if (c.value === '商铺') c.value = ''; shopUI(); });
+    shopUI();
     app.querySelectorAll('[data-kind]').forEach((b) => b.onclick = () => { x.kind = b.dataset.kind; app.querySelectorAll('[data-kind]').forEach((y) => y.setAttribute('aria-pressed', y === b)); $('#e-plabel').textContent = x.kind === '出租' ? '月租（元）' : '总价（万元）'; });
     app.querySelectorAll('[data-ev]').forEach((b) => b.onclick = () => { x.elevator = b.dataset.ev === '1'; app.querySelectorAll('[data-ev]').forEach((y) => y.setAttribute('aria-pressed', y === b)); });
     app.querySelectorAll('[data-ag]').forEach((b) => b.onclick = () => { const n = b.dataset.ag, i = x.agents.indexOf(n); if (i >= 0) x.agents.splice(i, 1); else x.agents.push(n); b.setAttribute('aria-pressed', i < 0); });
@@ -287,7 +291,7 @@
     $('#e-save').onclick = async () => {
       const num = (v) => String(v).replace(/[^\d.]/g, '');
       if (!commVal() && $('#e-cat').value !== '商铺') return err('请选小区（不在列表里就选第一个“其他”，自己填）');
-      if (!$('#e-unit').value.trim()) return err($('#e-cat').value === '商铺' ? '请写一下商铺位置' : '请填坐落');
+      if (!$('#e-unit').value.trim()) return err($('#e-cat').value === '商铺' ? '请填坐落（写清楚什么路几号）' : '请填坐落');
       if (dup()) return err('这套房子已经录过了，不能重复录入');
       if (isNew && !x.agents.length) return err('请至少选一个房源维护人');
       const shop = $('#e-cat').value === '商铺';

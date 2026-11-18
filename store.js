@@ -215,7 +215,7 @@
       async auntListingFeedback(id, content) { const a = me(); if (!a) return fail('请重新登记'); if (!content.trim()) return fail('反馈内容不能是空的'); const l = db.listings.find((y) => y.id === id); (l.feedback = l.feedback || []).push({ id: ++db.seq, author: a.name, content: content.trim(), created_at: new Date().toISOString() }); save(); },
       async auntListingSave(id, x) {
         const a = me(); if (!a) return fail('请重新登记');
-        if (!x.community && x.category !== '商铺') return fail('请选小区'); if (!x.unit) return fail(x.category === '商铺' ? '请写商铺位置' : '请填坐落');
+        if (!x.community && x.category !== '商铺') return fail('请选小区'); if (!x.unit) return fail('请填坐落');
         const dup = db.listings.find((y) => y.id !== id && houseKey(y) === houseKey(x));
         if (dup) return fail('系统里已经有这套房子了，不能重复录入');
         const num = (v) => v === '' || v == null ? null : Number(v);
@@ -380,7 +380,7 @@
     const lay = x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
     const price = x.price == null || x.price === '' ? '' : x.kind === '出租' ? `${x.price}元/月` : `${x.price}万`;
     const lines = [
-      [x.category === '商铺' && !x.community ? '位置' : '坐落', `${x.community || ''}${x.unit || ''}`],
+      ['坐落', `${x.community || ''}${x.unit || ''}`],
       [x.kind === '出租' ? '租金' : '价格', price],
       ['面积', x.area ? `${x.area}平` : ''],
       ['户型', [x.category, lay].filter(Boolean).join(' ')],
@@ -428,10 +428,9 @@
       if (hit && commKey(hit) !== commKey(name)) miss.push(`小区写的是“${name}”，按“${hit}”填了，请核对`);
       if (isShop) {
         x.category = '商铺';
-        // 商铺往往不在小区里，写的是“什么路什么号”：认得出小区就分开，认不出就整段当位置
-        if (hit && !shopWords.test(name)) { x.community = hit; x.unit = i < 0 ? '' : addr.slice(i).trim(); x.commKnown = true; }
-        else { x.community = ''; x.unit = addr.trim(); }
-        got.push('位置（商铺）');
+        // 商铺不选小区：整段地址都写在坐落里
+        x.community = ''; x.unit = addr.trim(); miss.splice(0, miss.length, ...miss.filter((m) => !m.startsWith('小区写的是')));
+        got.push('坐落（商铺）');
       } else {
         x.unit = i < 0 ? '' : addr.slice(i).trim();
         x.community = hit || name; x.commKnown = !!hit;
