@@ -1134,13 +1134,14 @@
   const layoutText = (x) => x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
   const cardSpec = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : ''].filter(Boolean).map(esc).join(' · ') || '还没填户型';  // 列表卡片只放最简单的
   const specLine = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : '', x.decoration, x.elevator ? '有电梯' : '没电梯', x.school === '有' ? '学区房' : '', x.years].filter(Boolean).map(esc).join(' · ');
-  const LF0 = { kind: '', status: 'active', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
+  const LF0 = { kind: '', status: 'active', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '', use: '' };
   const matchListing = (x, F, noStatus) => {
     const kw = (F.q || '').trim();
     if (!noStatus && F.status && x.status !== F.status) return false;
     if (F.kind && x.kind !== F.kind) return false;
     if (F.comm && x.community !== F.comm) return false;
     if (F.cat && x.category !== F.cat) return false;
+    if (F.use === 'shop' ? x.category !== '商铺' : F.use === 'home' && x.category === '商铺') return false;  // 住宅 / 商铺
     if (F.rooms !== '' && !(F.rooms === '5' ? x.rooms >= 5 : x.rooms === Number(F.rooms))) return false;
     if (F.halls !== '' && !(x.rooms != null && (F.halls === '3' ? x.halls >= 3 : (x.halls || 0) === Number(F.halls)))) return false;
     if (F.amin !== '' && !(x.area >= Number(F.amin))) return false;
@@ -1158,6 +1159,7 @@
       <div class="lf-head"><h3>找房源</h3>${Object.keys(LF0).some((k) => F[k] !== LF0[k]) || F.q ? '<button type="button" data-fclear class="linkish">清空条件</button>' : ''}</div>
       <input id="lq" type="search" enterkeyhint="search" autocomplete="off" value="${esc(F.q || '')}" placeholder="搜坐落、房东、电话、备注" aria-label="搜索房源">
       <div class="lf-row"><span>买卖</span>${seg('kind', [['', '全部'], ['出售', '出售'], ['出租', '出租']])}</div>
+      <div class="lf-row"><span>类别</span>${seg('use', [['', '全部'], ['home', '住宅'], ['shop', '🏪 商铺']])}</div>
       <div class="lf-row"><span>状态</span>${seg('status', [...statuses.map((s) => [s, LS[s]]), ['', '全部']])}</div>
       <div class="lf-row"><span>小区</span>${sel('comm', [['', '全部小区'], ...comms.map((c) => [c, c])])}</div>
       <div class="lf-row"><span>户型</span>${sel('cat', [['', '全部户型'], ...CATS.map((c) => [c, c])])}</div>
@@ -1198,7 +1200,7 @@
     const hit = (x) => matchListing(x, F); const list = base.filter(hit);
     const hasDeal = (x) => state.deals.some((d) => d.listing_id === x.id);
     const card = (x) => `<div class="card listing${x.status === 'off' ? ' off' : x.status === 'done' ? ' done' : ''}" data-l="${x.id}" role="button" tabindex="0"${hit(x) ? '' : ' style="display:none"'}>
-        <div class="lstrip ${x.kind === '出租' ? 'k-rent' : 'k-sale'}"><span>${x.kind === '出租' ? '出租' : '出售'}</span><span>${L_STATUS[x.status](x.kind)}</span></div>
+        <div class="lstrip ${x.kind === '出租' ? 'k-rent' : 'k-sale'}"><span>${x.kind === '出租' ? '出租' : '出售'}${x.category === '商铺' ? '<i class="shop-tag">🏪 商铺</i>' : ''}</span><span>${L_STATUS[x.status](x.kind)}</span></div>
         ${x.status === 'done' ? `<span class="seal" aria-label="已成交">${x.kind === '出租' ? '已租' : '已售'}</span>` : ''}
         <div class="row" style="gap:12px;flex-wrap:nowrap;align-items:flex-start">
           <div class="grow stack" style="min-width:0;text-align:left;gap:2px"><b style="font-size:18px">${esc(x.community || '（没写小区）')} ${esc(x.unit)}</b>
@@ -1259,9 +1261,10 @@
         <div class="card stack" id="ph-box" style="gap:8px"></div>
         <div class="card stack">
           <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
+          <div class="seg" role="group" aria-label="住宅还是商铺" style="grid-template-columns:repeat(2,1fr)"><button type="button" data-use="home" aria-pressed="${x.category !== '商铺'}">住宅</button><button type="button" data-use="shop" aria-pressed="${x.category === '商铺'}">🏪 商铺</button></div>
           <label class="field">小区<select id="l-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
           <input id="l-comm" value="${esc(other ? x.community : '')}" placeholder="写小区名字" aria-label="其他小区名字" ${other ? '' : 'hidden'}>
-          ${inp('l-unit', '坐落', x.unit, 'xx-xx')}
+          ${inp('l-unit', `<span id="l-unit-l">${x.category === '商铺' ? '位置（商铺）' : '坐落'}</span>`, x.unit, x.category === '商铺' ? '随便写，例如：临街18号门面、德林卤菜往东第五家' : 'xx-xx')}
           <div id="l-dup" class="notice err" hidden></div>
           <label class="field">户型分类<select id="l-cat"><option value="">—</option>${opt(CATS, x.category)}</select></label>
           <div class="row" style="flex-wrap:nowrap" id="l-rh">
@@ -1308,7 +1311,11 @@
     const showDup = () => { const d = findDup(), box = $('#l-dup', sheet); box.hidden = !d; if (d) box.textContent = `系统里已经有这套房子了：${d.community} ${d.unit}（${L_STATUS[d.status](d.kind)}，维护人 ${(d.agents || []).join('、') || '—'}），不能重复录入`; return d; };
     $('#l-comm-sel', sheet).onchange = () => { const o = $('#l-comm-sel', sheet).value === '__other'; $('#l-comm', sheet).hidden = !o; if (o) $('#l-comm', sheet).focus(); showDup(); };
     $('#l-comm', sheet).oninput = showDup; $('#l-unit', sheet).oninput = showDup;
-    const shop = () => { $('#l-rh', sheet).hidden = $('#l-cat', sheet).value === '商铺'; };
+    // 商铺：坐落没法按 xx-xx 写，改成“位置”随便写；不选几室几厅
+    const shop = () => { const on = $('#l-cat', sheet).value === '商铺'; $('#l-rh', sheet).hidden = on;
+      $('#l-unit-l', sheet).textContent = on ? '位置（商铺）' : '坐落'; $('#l-unit', sheet).placeholder = on ? '随便写，例如：临街18号门面、德林卤菜往东第五家' : 'xx-xx';
+      sheet.querySelectorAll('[data-use]').forEach((b) => b.setAttribute('aria-pressed', (b.dataset.use === 'shop') === on)); };
+    sheet.querySelectorAll('[data-use]').forEach((b) => b.onclick = () => { const c = $('#l-cat', sheet); if (b.dataset.use === 'shop') c.value = '商铺'; else if (c.value === '商铺') c.value = ''; shop(); });
     $('#l-cat', sheet).onchange = shop; shop();
     // 一键导出：生成房源群里那段文字，复制
     if ($('#l-export', sheet)) $('#l-export', sheet).onclick = async () => {
@@ -1378,7 +1385,7 @@
       collect();
       if (showDup()) { toast('这套房子已经录过了，不能重复录入'); $('#l-dup', sheet).scrollIntoView({ block: 'center' }); return false; }
       if (!x.community) { toast('请选小区（不在列表里就选第一个“其他”，自己填）'); return false; }
-      if (!x.unit) { toast('请填坐落'); return false; }
+      if (!x.unit) { toast(x.category === '商铺' ? '请写一下商铺位置' : '请填坐落'); return false; }
       if ((src ? src.note || '' : '') !== x.note) { x.note_by = '周姐'; x.note_at = new Date().toISOString(); x.note_log = [...(x.note_log || []), { by: '周姐', at: x.note_at, note: x.note }]; }
       delete x.feedback;
       // 店面自己把户型面积填上了，就不用再等业务员补全

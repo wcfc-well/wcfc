@@ -344,3 +344,4 @@ a.tel{color:var(--accent);font-weight:700;text-decoration:underline;white-space:
 .nudge-row .linkish{padding:0;min-height:0;border:0;background:none;font-size:17px;color:inherit}
 .tabbar3{grid-template-columns:repeat(3,1fr)!important}
 .dup-lock{opacity:.3;pointer-events:none;filter:grayscale(1);user-select:none}
+.shop-tag{font-style:normal;margin-left:8px;padding:1px 8px;border-radius:999px;background:#fff;color:#b5541c;font-size:13px;letter-spacing:0;font-weight:900}

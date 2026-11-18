@@ -78,13 +78,14 @@
   const layoutText = (x) => x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
   const cardSpec = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : ''].filter(Boolean).map(esc).join(' · ') || '还没填户型';  // 列表卡片只放最简单的
   const specLine = (x) => [x.category, layoutText(x), x.area ? x.area + '㎡' : '', x.decoration, x.elevator ? '有电梯' : '没电梯', x.school === '有' ? '学区房' : '', x.years].filter(Boolean).map(esc).join(' · ');
-  const LF0 = { kind: '', status: 'active', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '' };
+  const LF0 = { kind: '', status: 'active', comm: '', cat: '', rooms: '', halls: '', amin: '', amax: '', elev: '', use: '' };
   const matchListing = (x, F, noStatus) => {
     const kw = (F.q || '').trim();
     if (!noStatus && F.status && x.status !== F.status) return false;
     if (F.kind && x.kind !== F.kind) return false;
     if (F.comm && x.community !== F.comm) return false;
     if (F.cat && x.category !== F.cat) return false;
+    if (F.use === 'shop' ? x.category !== '商铺' : F.use === 'home' && x.category === '商铺') return false;  // 住宅 / 商铺
     if (F.rooms !== '' && !(F.rooms === '5' ? x.rooms >= 5 : x.rooms === Number(F.rooms))) return false;
     if (F.halls !== '' && !(x.rooms != null && (F.halls === '3' ? x.halls >= 3 : (x.halls || 0) === Number(F.halls)))) return false;
     if (F.amin !== '' && !(x.area >= Number(F.amin))) return false;
@@ -102,6 +103,7 @@
       <div class="lf-head"><h3>找房源</h3>${Object.keys(LF0).some((k) => F[k] !== LF0[k]) || F.q ? '<button type="button" data-fclear class="linkish">清空条件</button>' : ''}</div>
       <input id="lq" type="search" enterkeyhint="search" autocomplete="off" value="${esc(F.q || '')}" placeholder="搜坐落、房东、电话、备注" aria-label="搜索房源">
       <div class="lf-row"><span>买卖</span>${seg('kind', [['', '全部'], ['出售', '出售'], ['出租', '出租']])}</div>
+      <div class="lf-row"><span>类别</span>${seg('use', [['', '全部'], ['home', '住宅'], ['shop', '🏪 商铺']])}</div>
       <div class="lf-row"><span>状态</span>${seg('status', [...statuses.map((s) => [s, LS[s]]), ['', '全部']])}</div>
       <div class="lf-row"><span>小区</span>${sel('comm', [['', '全部小区'], ...comms.map((c) => [c, c])])}</div>
       <div class="lf-row"><span>户型</span>${sel('cat', [['', '全部户型'], ...CATS.map((c) => [c, c])])}</div>
@@ -155,7 +157,7 @@
       ${filterCard(LF, list, ['active', 'done'])}
       <div class="lf-count">找到 <b>${shown.length}</b> 套房源</div>
       ${base.map((x) => `<button class="card listing${x.status === 'done' ? ' done' : ''}" data-l="${x.id}"${hit(x) ? '' : ' style="display:none"'}>
-        <div class="lstrip ${x.kind === '出租' ? 'k-rent' : 'k-sale'}"><span>${x.kind}</span><span>${(LST[x.status] || LST.active)(x.kind)}</span></div>
+        <div class="lstrip ${x.kind === '出租' ? 'k-rent' : 'k-sale'}"><span>${x.kind}${x.category === '商铺' ? '<i class="shop-tag">🏪 商铺</i>' : ''}</span><span>${(LST[x.status] || LST.active)(x.kind)}</span></div>
         ${x.status === 'done' ? `<span class="seal" aria-label="已成交">${x.kind === '出租' ? '已租' : '已售'}</span>` : ''}
         <div class="row" style="gap:12px;flex-wrap:nowrap;align-items:flex-start">
           <div class="grow stack" style="min-width:0;text-align:left;gap:2px"><b style="font-size:18px">${esc(x.community)} ${esc(x.unit)}</b>
@@ -204,9 +206,10 @@
       <div class="card stack" id="ph-box" style="gap:8px"></div>
       <div class="card stack">
         <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
+        <div class="seg" role="group" aria-label="住宅还是商铺" style="grid-template-columns:repeat(2,1fr)"><button type="button" data-use="home" aria-pressed="${x.category !== '商铺'}">住宅</button><button type="button" data-use="shop" aria-pressed="${x.category === '商铺'}">🏪 商铺</button></div>
         <label class="field">小区<select id="e-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
         <input id="e-comm" value="${esc(other ? x.community : '')}" placeholder="写小区名字" aria-label="其他小区名字" ${other ? '' : 'hidden'}>
-        <label class="field">坐落<input id="e-unit" value="${esc(x.unit)}" placeholder="xx-xx"></label>
+        <label class="field"><span id="e-unit-l">${x.category === '商铺' ? '位置（商铺）' : '坐落'}</span><input id="e-unit" value="${esc(x.unit)}" placeholder="${x.category === '商铺' ? '随便写，例如：临街18号门面、德林卤菜往东第五家' : 'xx-xx'}"></label>
         <div id="e-dup" class="notice err" hidden></div>
         <label class="field">户型分类<select id="e-cat"><option value="">—</option>${opt(CATS, x.category)}</select></label>
         <div class="row" style="flex-wrap:nowrap" id="e-rh" ${x.category === '商铺' ? 'hidden' : ''}>
@@ -242,7 +245,12 @@
       const box = $('#e-dup'); box.hidden = !d; if (d) box.textContent = `系统里已经有这套房子了（维护人 ${(d.agents || []).join('、') || '—'}），不能重复录入`; return !!d; };
     $('#e-comm-sel').onchange = () => { const o = $('#e-comm-sel').value === '__other'; $('#e-comm').hidden = !o; if (o) $('#e-comm').focus(); dup(); };
     $('#e-comm').oninput = $('#e-unit').oninput = dup;
-    $('#e-cat').onchange = () => { $('#e-rh').hidden = $('#e-cat').value === '商铺'; };
+    // 商铺：坐落没法按 xx-xx 写，改成“位置”随便写；不选几室几厅
+    const shopUI = () => { const on = $('#e-cat').value === '商铺'; $('#e-rh').hidden = on;
+      $('#e-unit-l').textContent = on ? '位置（商铺）' : '坐落'; $('#e-unit').placeholder = on ? '随便写，例如：临街18号门面、德林卤菜往东第五家' : 'xx-xx';
+      app.querySelectorAll('[data-use]').forEach((b) => b.setAttribute('aria-pressed', (b.dataset.use === 'shop') === on)); };
+    $('#e-cat').onchange = shopUI;
+    app.querySelectorAll('[data-use]').forEach((b) => b.onclick = () => { const c = $('#e-cat'); if (b.dataset.use === 'shop') c.value = '商铺'; else if (c.value === '商铺') c.value = ''; shopUI(); });
     app.querySelectorAll('[data-kind]').forEach((b) => b.onclick = () => { x.kind = b.dataset.kind; app.querySelectorAll('[data-kind]').forEach((y) => y.setAttribute('aria-pressed', y === b)); $('#e-plabel').textContent = x.kind === '出租' ? '月租（元）' : '总价（万元）'; });
     app.querySelectorAll('[data-ev]').forEach((b) => b.onclick = () => { x.elevator = b.dataset.ev === '1'; app.querySelectorAll('[data-ev]').forEach((y) => y.setAttribute('aria-pressed', y === b)); });
     app.querySelectorAll('[data-ag]').forEach((b) => b.onclick = () => { const n = b.dataset.ag, i = x.agents.indexOf(n); if (i >= 0) x.agents.splice(i, 1); else x.agents.push(n); b.setAttribute('aria-pressed', i < 0); });
@@ -258,7 +266,7 @@
         else { $('#e-comm-sel').value = '__other'; $('#e-comm').hidden = false; $('#e-comm').value = y.community; }
       }
       if (y.unit != null) $('#e-unit').value = y.unit;
-      if (y.category) { $('#e-cat').value = y.category; $('#e-rh').hidden = y.category === '商铺'; }
+      if (y.category) { $('#e-cat').value = y.category; shopUI(); }
       if (y.rooms != null) { $('#e-rooms').value = String(y.rooms); $('#e-halls').value = String(y.halls || 0); }
       if (y.area != null) $('#e-area').value = y.area;
       if (y.decoration) $('#e-deco').value = y.decoration;
@@ -275,7 +283,7 @@
     $('#e-save').onclick = async () => {
       const num = (v) => String(v).replace(/[^\d.]/g, '');
       if (!commVal()) return err('请选小区（不在列表里就选第一个“其他”，自己填）');
-      if (!$('#e-unit').value.trim()) return err('请填坐落');
+      if (!$('#e-unit').value.trim()) return err($('#e-cat').value === '商铺' ? '请写一下商铺位置' : '请填坐落');
       if (dup()) return err('这套房子已经录过了，不能重复录入');
       if (isNew && !x.agents.length) return err('请至少选一个房源维护人');
       const shop = $('#e-cat').value === '商铺';
