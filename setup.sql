@@ -814,7 +814,7 @@ insert into confirmations (deal_id, agent_name, status, note, at)
    where d.status = 'confirming'
 on conflict (deal_id, agent_name) do update set status = 'ok', note = '自动确认', at = now();
 
--- ---------- 2026-11-16：房源加“学区”“年限”（房源群里一直有写），业务员录入/修改也能填 ----------
+-- ---------- 2026-11-16：房源加“学区”“年限”；11-18：商铺可以不选小区（房源群里一直有写），业务员录入/修改也能填 ----------
 alter table listings add column if not exists school text not null default '';   -- 学区：有 / 无
 alter table listings add column if not exists years text not null default '';    -- 年限：不满2 / 满2 / 满5
 create or replace function aunt_listing_save(p_token text, p_id bigint, p jsonb) returns bigint
@@ -823,8 +823,8 @@ declare a agents; l listings; ags text[]; new_id bigint;
 begin
   select * into a from agents where device_token = p_token and active;
   if not found then raise exception '请重新登记'; end if;
-  if coalesce(trim(p->>'community'), '') = '' then raise exception '请选小区'; end if;
-  if coalesce(trim(p->>'unit'), '') = '' then raise exception '请填坐落'; end if;
+  if coalesce(trim(p->>'community'), '') = '' and coalesce(p->>'category', '') <> '商铺' then raise exception '请选小区'; end if;  -- 商铺可以不在小区里
+  if coalesce(trim(p->>'unit'), '') = '' then raise exception '请填坐落（商铺写位置）'; end if;
   if coalesce(p->>'kind', '') not in ('出售', '出租') then raise exception '请选出售还是出租'; end if;
   begin
     if p_id is null then

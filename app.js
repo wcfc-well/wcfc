@@ -756,7 +756,7 @@
       }
       if (d.type !== '新房') {
         const h = house();
-        if (!h.comm || !h.unit) return toast('请选小区、填坐落');
+        if (!h.unit || (!h.comm && !h.listing)) return toast(h.unit ? '请选小区（不在小区里的商铺，先到房源里录好这个铺子，这里坐落从下拉里选）' : '请选小区、填坐落');
         if (!h.listing) {
           // 房源里没有：自动新建一条（只有基本信息），和这一单绑在一起
           const nl = { kind: d.type === '租房' ? '出租' : '出售', community: h.comm, unit: h.unit, owners: d.owner_name ? d.owner_name.split(/[、，,\s]+/).filter(Boolean).map((n) => ({ name: n, phone: '' })) : [], agents: (d.type === '合作' ? d.client_agents : d.listing_agents).slice(), status: 'active', note: '', note_log: [], elevator: false, needs_info: true, created_at: today() };
@@ -783,7 +783,7 @@
     function house() {
       const comm = (fComm.value === '__other' ? fOther.value : fComm.value).trim(), unit = fUnit.value.trim();
       const k = houseKey({ community: comm, unit });
-      return { comm, unit, listing: comm && unit ? state.listings.find((l) => houseKey(l) === k) : null };
+      return { comm, unit, listing: unit ? state.listings.find((l) => houseKey(l) === k && (comm || l.category === '商铺')) : null };  // 商铺可以没有小区
     }
     let autoOwner = '';
     // 重复记账：房子一填好就查，重复的话下面全部锁住，不让继续填
@@ -820,7 +820,7 @@
       // 房东名字跟着关联的房源走：换了房子，之前自动带出来的名字也换掉（手动改过的不动）
       const names = h.listing ? (h.listing.owners || []).map((o) => o.name).filter(Boolean).join('、') : '';
       if (!own.value.trim() || own.value === autoOwner) { own.value = names; autoOwner = names; }
-      if (!h.comm || !h.unit) { info.textContent = '选小区、填坐落，房源里有的会自动关联'; return; }
+      if (!h.unit || (!h.comm && !h.listing)) { info.textContent = '选小区、填坐落，房源里有的会自动关联（不在小区里的商铺，小区不用选，坐落从下拉里选）'; return; }
       if (h.listing && h.listing.id !== (deal && deal.listing_id) && h.listing.status !== 'active') { info.textContent = `⚠ 这套房源已经是“${L_STATUS[h.listing.status](h.listing.kind)}”，确认没有记重吗？`; return; }
       info.textContent = h.listing ? (deal && h.listing.id === deal.listing_id ? `✓ 已关联房源（${L_STATUS[h.listing.status](h.listing.kind)}），详细信息在“房源”里看` : '✓ 已关联房源，保存后房源自动变成已售 / 已租') : '房源里还没有这套，保存时会自动新建一条房源（详细信息以后到房源里补）';
     };
@@ -1203,7 +1203,7 @@
         <div class="lstrip ${x.kind === '出租' ? 'k-rent' : 'k-sale'}"><span>${x.kind === '出租' ? '出租' : '出售'}${x.category === '商铺' ? '<i class="shop-tag">🏪 商铺</i>' : ''}</span><span>${L_STATUS[x.status](x.kind)}</span></div>
         ${x.status === 'done' ? `<span class="seal" aria-label="已成交">${x.kind === '出租' ? '已租' : '已售'}</span>` : ''}
         <div class="row" style="gap:12px;flex-wrap:nowrap;align-items:flex-start">
-          <div class="grow stack" style="min-width:0;text-align:left;gap:2px"><b style="font-size:18px">${esc(x.community || '（没写小区）')} ${esc(x.unit)}</b>
+          <div class="grow stack" style="min-width:0;text-align:left;gap:2px"><b style="font-size:18px">${esc(x.community || (x.category === '商铺' ? '' : '（没写小区）'))} ${esc(x.unit)}</b>
             <div class="small muted">${x.needs_info ? '<span class="pill warn">等维护人补全</span>' : cardSpec(x)}</div>
             <div>${dealPrice(x) != null ? `<b class="num" style="font-size:18px;color:#c0392b">${soldText(x, dealPrice(x))}</b> <span class="small muted">挂牌 ${priceText(x)}</span>` : `<b class="num" style="font-size:18px;color:var(--accent)">${priceText(x)}</b>`}</div></div>
           ${x.photo_thumb ? `<img class="lphoto" data-lphoto="${x.id}" src="${x.photo_thumb}" alt="房子照片，点开看大图">` : ''}</div>
@@ -1262,10 +1262,10 @@
         <div class="card stack">
           <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
           <div class="seg" role="group" aria-label="住宅还是商铺" style="grid-template-columns:repeat(2,1fr)"><button type="button" data-use="home" aria-pressed="${x.category !== '商铺'}">住宅</button><button type="button" data-use="shop" aria-pressed="${x.category === '商铺'}">🏪 商铺</button></div>
-          <label class="field">小区<select id="l-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
+          <label class="field"><span id="l-comm-l">${x.category === '商铺' ? '小区（商铺不在小区里就不用选）' : '小区'}</span><select id="l-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
           <input id="l-comm" value="${esc(other ? x.community : '')}" placeholder="写小区名字" aria-label="其他小区名字" ${other ? '' : 'hidden'}>
           ${inp('l-unit', `<span id="l-unit-l">${x.category === '商铺' ? '位置（商铺）' : '坐落'}</span>`, x.unit, x.category === '商铺' ? '随便写，例如：临街18号门面、德林卤菜往东第五家' : 'xx-xx')}
-          <div id="l-dup" class="notice err" hidden></div>
+          <div id="l-dup" class="notice err" hidden></div><div id="l-sim" class="notice" hidden></div>
           <label class="field">户型分类<select id="l-cat"><option value="">—</option>${opt(CATS, x.category)}</select></label>
           <div class="row" style="flex-wrap:nowrap" id="l-rh">
             <label class="field grow" style="min-width:0">几室<select id="l-rooms"><option value="">—</option>${nopt(8, x.rooms, '室')}</select></label>
@@ -1307,14 +1307,18 @@
     const num = (v) => { v = String(v).replace(/[^\d.]/g, ''); return v === '' ? null : Number(v); };
     const int = (v) => v === '' ? null : Number(v);
     const commVal = () => { const v = $('#l-comm-sel', sheet).value; return (v === '__other' ? $('#l-comm', sheet).value : v).trim(); };
-    const findDup = () => { const k = houseKey({ community: commVal(), unit: $('#l-unit', sheet).value }); return !k.startsWith('|') && !k.endsWith('|') && state.listings.find((y) => y.id !== x.id && houseKey(y) === k); };
+    const findDup = () => { const k = houseKey({ community: commVal(), unit: $('#l-unit', sheet).value }); return (!k.startsWith('|') || $('#l-cat', sheet).value === '商铺') && !k.endsWith('|') && state.listings.find((y) => y.id !== x.id && houseKey(y) === k); };
     const showDup = () => { const d = findDup(), box = $('#l-dup', sheet); box.hidden = !d; if (d) box.textContent = `系统里已经有这套房子了：${d.community} ${d.unit}（${L_STATUS[d.status](d.kind)}，维护人 ${(d.agents || []).join('、') || '—'}），不能重复录入`; return d; };
     $('#l-comm-sel', sheet).onchange = () => { const o = $('#l-comm-sel', sheet).value === '__other'; $('#l-comm', sheet).hidden = !o; if (o) $('#l-comm', sheet).focus(); showDup(); };
-    $('#l-comm', sheet).oninput = showDup; $('#l-unit', sheet).oninput = showDup;
+    // 商铺位置写法不固定：很像的也提醒一下（不拦）
+    const showSim = () => { const box = $('#l-sim', sheet); const on = $('#l-cat', sheet).value === '商铺'; const sim = on && !findDup() ? U.similarShops($('#l-unit', sheet).value, state.listings, x.id) : [];
+      box.hidden = !sim.length; if (sim.length) box.innerHTML = '这些铺子位置很像，看一下是不是同一个：<br>' + sim.slice(0, 3).map((y) => `${esc(y.community || '')}${esc(y.unit)}（${esc(y.kind)}，维护人 ${esc((y.agents || []).join('、') || '—')}）`).join('<br>'); };
+    $('#l-comm', sheet).oninput = () => { showDup(); showSim(); }; $('#l-unit', sheet).oninput = () => { showDup(); showSim(); };
     // 商铺：坐落没法按 xx-xx 写，改成“位置”随便写；不选几室几厅
     const shop = () => { const on = $('#l-cat', sheet).value === '商铺'; $('#l-rh', sheet).hidden = on;
       $('#l-unit-l', sheet).textContent = on ? '位置（商铺）' : '坐落'; $('#l-unit', sheet).placeholder = on ? '随便写，例如：临街18号门面、德林卤菜往东第五家' : 'xx-xx';
-      sheet.querySelectorAll('[data-use]').forEach((b) => b.setAttribute('aria-pressed', (b.dataset.use === 'shop') === on)); };
+      sheet.querySelectorAll('[data-use]').forEach((b) => b.setAttribute('aria-pressed', (b.dataset.use === 'shop') === on));
+      $('#l-comm-l', sheet).textContent = on ? '小区（商铺不在小区里就不用选）' : '小区'; if (typeof showSim === 'function') showSim(); };
     sheet.querySelectorAll('[data-use]').forEach((b) => b.onclick = () => { const c = $('#l-cat', sheet); if (b.dataset.use === 'shop') c.value = '商铺'; else if (c.value === '商铺') c.value = ''; shop(); });
     $('#l-cat', sheet).onchange = shop; shop();
     // 一键导出：生成房源群里那段文字，复制
@@ -1329,6 +1333,7 @@
       const { x: y, got, miss } = U.parseListingText($('#l-import-t', sheet).value, known, state.agents.filter((a) => a.active).map((a) => a.name));
       if (!got.length) { $('#l-import-r', sheet).textContent = '没认出来，请按“坐落：… 价格：…”一行一项的格式粘贴'; return; }
       if (y.kind !== x.kind) sheet.querySelector(`[data-kind="${y.kind}"]`).click();
+      if (y.category === '商铺' && !y.community) { $('#l-comm-sel', sheet).value = ''; $('#l-comm', sheet).hidden = true; }
       if (y.community) {
         if (known.includes(y.community)) { $('#l-comm-sel', sheet).value = y.community; $('#l-comm', sheet).hidden = true; }
         else { $('#l-comm-sel', sheet).value = '__other'; $('#l-comm', sheet).hidden = false; $('#l-comm', sheet).value = y.community; }
@@ -1345,7 +1350,7 @@
       if (y.owners.length) { $('#olines', sheet).innerHTML = y.owners.map(oline).join(''); }
       if (y.agents.length && !agentsLocked) { x.agents = y.agents.slice(); $('#ag-chips', sheet).innerHTML = chipsHTML(); }
       if (y.note) $('#l-note', sheet).value = y.note;
-      showDup();
+      showDup(); showSim();
       $('#l-import-r', sheet).innerHTML = `✓ 认出了：${got.join('、')}。请往下核对一遍再保存。${miss.length ? '<br><span style="color:#c0392b">' + miss.map(esc).join('<br>') + '</span>' : ''}`;
     };
     sheet.querySelectorAll('[data-elev]').forEach((b) => b.onclick = () => { x.elevator = b.dataset.elev === 'true'; sheet.querySelectorAll('[data-elev]').forEach((y) => y.setAttribute('aria-pressed', y === b)); });
@@ -1384,7 +1389,7 @@
       if (saving) return false;
       collect();
       if (showDup()) { toast('这套房子已经录过了，不能重复录入'); $('#l-dup', sheet).scrollIntoView({ block: 'center' }); return false; }
-      if (!x.community) { toast('请选小区（不在列表里就选第一个“其他”，自己填）'); return false; }
+      if (!x.community && x.category !== '商铺') { toast('请选小区（不在列表里就选第一个“其他”，自己填）'); return false; }
       if (!x.unit) { toast(x.category === '商铺' ? '请写一下商铺位置' : '请填坐落'); return false; }
       if ((src ? src.note || '' : '') !== x.note) { x.note_by = '周姐'; x.note_at = new Date().toISOString(); x.note_log = [...(x.note_log || []), { by: '周姐', at: x.note_at, note: x.note }]; }
       delete x.feedback;

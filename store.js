@@ -215,7 +215,7 @@
       async auntListingFeedback(id, content) { const a = me(); if (!a) return fail('请重新登记'); if (!content.trim()) return fail('反馈内容不能是空的'); const l = db.listings.find((y) => y.id === id); (l.feedback = l.feedback || []).push({ id: ++db.seq, author: a.name, content: content.trim(), created_at: new Date().toISOString() }); save(); },
       async auntListingSave(id, x) {
         const a = me(); if (!a) return fail('请重新登记');
-        if (!x.community) return fail('请选小区'); if (!x.unit) return fail('请填坐落');
+        if (!x.community && x.category !== '商铺') return fail('请选小区'); if (!x.unit) return fail(x.category === '商铺' ? '请写商铺位置' : '请填坐落');
         const dup = db.listings.find((y) => y.id !== id && houseKey(y) === houseKey(x));
         if (dup) return fail('系统里已经有这套房子了，不能重复录入');
         const num = (v) => v === '' || v == null ? null : Number(v);
@@ -357,11 +357,30 @@
   const cnNum = (s) => String(s || '').replace(/[一二三四五六七八九十]/g, (c) => '一二三四五六七八九'.indexOf(c) + 1 || 10);
   // 小区名字比较时去掉“新村/花园/家园/小区”、空格，汉字数字换成阿拉伯数字：畅苑三区 = 畅苑新村三区
   const commKey = (s) => cnNum(String(s || '').replace(/\s|新村|花园|家园|小区|社区/g, ''));
+  // 小区模糊对：一样、前后包含、或者字按顺序都在（只差一两个字）就算；对上好几个就不算
+  const findCommunity = (name, communities) => {
+    const k = commKey(name); if (!k) return null;
+    const keys = communities.map((c) => [c, commKey(c)]);
+    const one = (arr) => arr.length === 1 ? arr[0][0] : arr.length > 1 ? arr.sort((a, b) => a[1].length - b[1].length)[0][0] : null;
+    const exact = keys.filter(([, ck]) => ck === k); if (exact.length) return exact[0][0];
+    const pre = keys.filter(([, ck]) => ck.startsWith(k) || k.startsWith(ck)); if (pre.length === 1) return pre[0][0];
+    const inside = keys.filter(([, ck]) => ck.includes(k) || k.includes(ck)); if (inside.length === 1) return inside[0][0];
+    const subseq = (a, b) => { let i = 0; for (const ch of b) if (ch === a[i]) i++; return i === a.length; };
+    const near = keys.filter(([, ck]) => (subseq(k, ck) || subseq(ck, k)) && Math.abs(ck.length - k.length) <= 2 && Math.min(ck.length, k.length) >= 2);
+    return near.length === 1 ? near[0][0] : one(pre.length ? pre : []);
+  };
+  // 商铺位置比较：去掉空格标点和“号/门面/商铺/临街/一楼”这些字，汉字数字换成阿拉伯数字
+  const shopKey = (s) => cnNum(String(s || '').toLowerCase().replace(/[\s,，、.。·#\-—–_/()（）:：]|号|门面|商铺|店铺|铺面|临街|沿街|底商|一楼|1楼/g, ''));
+  // 和这个商铺位置很像的（不一定一模一样）：一样，或者一个包含另一个
+  const similarShops = (unit, list, selfId) => {
+    const k = shopKey(unit); if (k.length < 3) return [];
+    return list.filter((y) => y.id !== selfId && y.category === '商铺' && (() => { const yk = shopKey(y.unit) + '|' + shopKey(y.community); return yk.split('|').some((p) => p.length >= 3 && (p === k || p.includes(k) || k.includes(p))) || shopKey((y.community || '') + (y.unit || '')).includes(k); })());
+  };
   const listingText = (x) => {
     const lay = x.rooms != null && x.rooms !== '' ? `${x.rooms}室${x.halls || 0}厅` : (x.layout || '');
     const price = x.price == null || x.price === '' ? '' : x.kind === '出租' ? `${x.price}元/月` : `${x.price}万`;
     const lines = [
-      ['坐落', `${x.community || ''}${x.unit || ''}`],
+      [x.category === '商铺' && !x.community ? '位置' : '坐落', `${x.community || ''}${x.unit || ''}`],
       [x.kind === '出租' ? '租金' : '价格', price],
       ['面积', x.area ? `${x.area}平` : ''],
       ['户型', [x.category, lay].filter(Boolean).join(' ')],
@@ -383,16 +402,6 @@
       pick[m[1]] = (pick[m[1]] ? pick[m[1]] + ' ' : '') + m[2].trim();
     });
     const take = (...ks) => { for (const k of ks) if (pick[k] != null) { const v = pick[k]; delete pick[k]; return v; } return null; };
-    const addr = take('坐落', '地址', '房源', '小区');
-    if (addr) {
-      const i = addr.search(/\d/);
-      const name = (i < 0 ? addr : addr.slice(0, i)).replace(/[\s,，、]+$/, '').trim();
-      x.unit = i < 0 ? '' : addr.slice(i).trim();
-      const k = commKey(name);
-      const hit = k && (communities.find((c) => commKey(c) === k) || communities.find((c) => commKey(c).startsWith(k) || k.startsWith(commKey(c))));
-      x.community = hit || name; x.commKnown = !!hit;
-      got.push('坐落'); if (!hit && name) miss.push(`小区“${name}”不在列表里，已放进“其他”`);
-    }
     const price = take('价格', '售价', '总价', '租金', '月租');
     if (price) {
       const n = (price.match(/\d+(\.\d+)?/) || [])[0];
@@ -407,6 +416,27 @@
       const r = cat.match(/(\d|[一二三四五六七])\s*室\s*(?:(\d|[一二三四五六七])\s*厅)?/);
       if (r) { x.rooms = Number(cnNum(r[1])); x.halls = r[2] ? Number(cnNum(r[2])) : 0; }
       if (c || r) got.push('户型'); else extraNote.push('户型：' + cat);
+    }
+    const addr = take('坐落', '地址', '房源', '小区', '位置');
+    if (addr) {
+      const shopWords = /路|街|大道|巷|弄|门面|商铺|铺面|店|广场|市场/;
+      const isShop = x.category === '商铺' || (!x.category && shopWords.test(addr));
+      // 从第一个门牌数字分开：“青苑2区26-1303”里的“2区”算小区名字
+      let i = -1; for (const m of addr.matchAll(/\d+/g)) { if (!/^[区期村]/.test(addr.slice(m.index + m[0].length))) { i = m.index; break; } }
+      const name = (i < 0 ? addr : addr.slice(0, i)).replace(/[\s,，、]+$/, '').trim();
+      const hit = name ? findCommunity(name, communities) : null;
+      if (hit && commKey(hit) !== commKey(name)) miss.push(`小区写的是“${name}”，按“${hit}”填了，请核对`);
+      if (isShop) {
+        x.category = '商铺';
+        // 商铺往往不在小区里，写的是“什么路什么号”：认得出小区就分开，认不出就整段当位置
+        if (hit && !shopWords.test(name)) { x.community = hit; x.unit = i < 0 ? '' : addr.slice(i).trim(); x.commKnown = true; }
+        else { x.community = ''; x.unit = addr.trim(); }
+        got.push('位置（商铺）');
+      } else {
+        x.unit = i < 0 ? '' : addr.slice(i).trim();
+        x.community = hit || name; x.commKnown = !!hit;
+        got.push('坐落'); if (!hit && name) miss.push(`小区“${name}”不在列表里，已放进“其他”`);
+      }
     }
     const deco = take('装修');
     if (deco) { const d = DECOS.find((t) => deco.includes(t)); if (d) { x.decoration = d; got.push('装修'); } const rest = deco.replace(d || '', '').trim(); if (rest) extraNote.push('装修：' + rest); }
@@ -442,7 +472,7 @@
     if (x.note) got.push('备注');
     return { x, got, miss };
   };
-  window.StoreUtil = { listingText, parseListingText, commKey, involves, participants, people, STAFF, houseKey, unitKey, dealKey, dupDeal, DUP_DAYS };
+  window.StoreUtil = { listingText, parseListingText, commKey, findCommunity, shopKey, similarShops, involves, participants, people, STAFF, houseKey, unitKey, dealKey, dupDeal, DUP_DAYS };
 
   // 房源照片：手机选一张，压缩成大图（最长 1280）和小图（最长 320），都是 jpg
   function resizeTo(img, max, q) {

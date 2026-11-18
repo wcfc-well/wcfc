@@ -207,10 +207,10 @@
       <div class="card stack">
         <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
         <div class="seg" role="group" aria-label="住宅还是商铺" style="grid-template-columns:repeat(2,1fr)"><button type="button" data-use="home" aria-pressed="${x.category !== '商铺'}">住宅</button><button type="button" data-use="shop" aria-pressed="${x.category === '商铺'}">🏪 商铺</button></div>
-        <label class="field">小区<select id="e-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
+        <label class="field"><span id="e-comm-l">${x.category === '商铺' ? '小区（商铺不在小区里就不用选）' : '小区'}</span><select id="e-comm-sel"><option value="">请选择小区</option><option value="__other" ${other ? 'selected' : ''}>其他（新拓展的小区，自己填）</option><optgroup label="常用小区">${opt(COMMUNITIES, x.community)}</optgroup>${extra.length ? `<optgroup label="后来录入的小区">${opt(extra, x.community)}</optgroup>` : ''}</select></label>
         <input id="e-comm" value="${esc(other ? x.community : '')}" placeholder="写小区名字" aria-label="其他小区名字" ${other ? '' : 'hidden'}>
         <label class="field"><span id="e-unit-l">${x.category === '商铺' ? '位置（商铺）' : '坐落'}</span><input id="e-unit" value="${esc(x.unit)}" placeholder="${x.category === '商铺' ? '随便写，例如：临街18号门面、德林卤菜往东第五家' : 'xx-xx'}"></label>
-        <div id="e-dup" class="notice err" hidden></div>
+        <div id="e-dup" class="notice err" hidden></div><div id="e-sim" class="notice" hidden></div>
         <label class="field">户型分类<select id="e-cat"><option value="">—</option>${opt(CATS, x.category)}</select></label>
         <div class="row" style="flex-wrap:nowrap" id="e-rh" ${x.category === '商铺' ? 'hidden' : ''}>
           <label class="field grow" style="min-width:0">几室<select id="e-rooms"><option value="">—</option>${nopt(8, x.rooms, '室')}</select></label>
@@ -241,14 +241,17 @@
     $('#back').onclick = () => isNew ? listings() : listingDetail(all.find((y) => y.id === x.id), all);
     const commVal = () => { const v = $('#e-comm-sel').value; return (v === '__other' ? $('#e-comm').value : v).trim(); };
     const key = (c, u) => window.StoreUtil.houseKey({ community: c, unit: u });
-    const dup = () => { const k = key(commVal(), $('#e-unit').value); const d = commVal() && $('#e-unit').value.trim() && all.find((y) => y.id !== x.id && key(y.community, y.unit) === k);
+    const dup = () => { const k = key(commVal(), $('#e-unit').value); const d = (commVal() || $('#e-cat').value === '商铺') && $('#e-unit').value.trim() && all.find((y) => y.id !== x.id && key(y.community, y.unit) === k);
       const box = $('#e-dup'); box.hidden = !d; if (d) box.textContent = `系统里已经有这套房子了（维护人 ${(d.agents || []).join('、') || '—'}），不能重复录入`; return !!d; };
     $('#e-comm-sel').onchange = () => { const o = $('#e-comm-sel').value === '__other'; $('#e-comm').hidden = !o; if (o) $('#e-comm').focus(); dup(); };
-    $('#e-comm').oninput = $('#e-unit').oninput = dup;
+    const showSim = () => { const box = $('#e-sim'); const on = $('#e-cat').value === '商铺'; const sim = on && !dup() ? window.StoreUtil.similarShops($('#e-unit').value, all, x.id) : [];
+      box.hidden = !sim.length; if (sim.length) box.innerHTML = '这些铺子位置很像，看一下是不是同一个：<br>' + sim.slice(0, 3).map((y) => `${esc(y.community || '')}${esc(y.unit)}（${esc(y.kind)}，维护人 ${esc((y.agents || []).join('、') || '—')}）`).join('<br>'); };
+    $('#e-comm').oninput = $('#e-unit').oninput = () => { dup(); showSim(); };
     // 商铺：坐落没法按 xx-xx 写，改成“位置”随便写；不选几室几厅
     const shopUI = () => { const on = $('#e-cat').value === '商铺'; $('#e-rh').hidden = on;
       $('#e-unit-l').textContent = on ? '位置（商铺）' : '坐落'; $('#e-unit').placeholder = on ? '随便写，例如：临街18号门面、德林卤菜往东第五家' : 'xx-xx';
-      app.querySelectorAll('[data-use]').forEach((b) => b.setAttribute('aria-pressed', (b.dataset.use === 'shop') === on)); };
+      app.querySelectorAll('[data-use]').forEach((b) => b.setAttribute('aria-pressed', (b.dataset.use === 'shop') === on));
+      $('#e-comm-l').textContent = on ? '小区（商铺不在小区里就不用选）' : '小区'; showSim(); };
     $('#e-cat').onchange = shopUI;
     app.querySelectorAll('[data-use]').forEach((b) => b.onclick = () => { const c = $('#e-cat'); if (b.dataset.use === 'shop') c.value = '商铺'; else if (c.value === '商铺') c.value = ''; shopUI(); });
     app.querySelectorAll('[data-kind]').forEach((b) => b.onclick = () => { x.kind = b.dataset.kind; app.querySelectorAll('[data-kind]').forEach((y) => y.setAttribute('aria-pressed', y === b)); $('#e-plabel').textContent = x.kind === '出租' ? '月租（元）' : '总价（万元）'; });
@@ -261,6 +264,7 @@
       const { x: y, got, miss } = window.StoreUtil.parseListingText($('#e-import-t').value, known, names);
       if (!got.length) { $('#e-import-r').textContent = '没认出来，请按“坐落：… 价格：…”一行一项的格式粘贴'; return; }
       if (y.kind !== x.kind) app.querySelector(`[data-kind="${y.kind}"]`).click();
+      if (y.category === '商铺' && !y.community) { $('#e-comm-sel').value = ''; $('#e-comm').hidden = true; }
       if (y.community) {
         if (known.includes(y.community)) { $('#e-comm-sel').value = y.community; $('#e-comm').hidden = true; }
         else { $('#e-comm-sel').value = '__other'; $('#e-comm').hidden = false; $('#e-comm').value = y.community; }
@@ -277,12 +281,12 @@
       if (y.owners.length && canOwner) $('#olines').innerHTML = y.owners.map(oline).join('');
       if (y.agents.length) { x.agents = y.agents.slice(); app.querySelectorAll('#e-chips [data-ag]').forEach((b) => b.setAttribute('aria-pressed', x.agents.includes(b.dataset.ag))); }
       if (y.note && $('#e-note')) $('#e-note').value = y.note;
-      dup();
+      dup(); showSim();
       $('#e-import-r').innerHTML = `✓ 认出了：${got.join('、')}。请往下核对一遍再保存。${miss.length ? '<br><span style="color:#c0392b">' + miss.map(esc).join('<br>') + '</span>' : ''}`;
     };
     $('#e-save').onclick = async () => {
       const num = (v) => String(v).replace(/[^\d.]/g, '');
-      if (!commVal()) return err('请选小区（不在列表里就选第一个“其他”，自己填）');
+      if (!commVal() && $('#e-cat').value !== '商铺') return err('请选小区（不在列表里就选第一个“其他”，自己填）');
       if (!$('#e-unit').value.trim()) return err($('#e-cat').value === '商铺' ? '请写一下商铺位置' : '请填坐落');
       if (dup()) return err('这套房子已经录过了，不能重复录入');
       if (isNew && !x.agents.length) return err('请至少选一个房源维护人');
