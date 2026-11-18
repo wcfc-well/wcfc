@@ -202,7 +202,7 @@
 房东：…
 维护：…
 备注：…"></textarea>
-        <button type="button" class="btn-primary" id="e-import-go">识别，填到下面</button><div id="e-import-r" class="small"></div></div></details>` : ''}
+        <button type="button" class="btn-primary" id="e-import-go">识别，填到下面</button><button type="button" id="e-import-ai" style="margin-top:6px">写得太乱？用 AI 整理一下（免费）</button><div id="e-import-r" class="small"></div></div></details>` : ''}
       <div class="card stack" id="ph-box" style="gap:8px"></div>
       <div class="card stack">
         <div class="seg" role="group" aria-label="出售还是出租" style="grid-template-columns:repeat(2,1fr)">${['出售', '出租'].map((k) => `<button type="button" data-kind="${k}" aria-pressed="${x.kind === k}">${k}</button>`).join('')}</div>
@@ -263,6 +263,14 @@
     app.querySelectorAll('[data-ag]').forEach((b) => b.onclick = () => { const n = b.dataset.ag, i = x.agents.indexOf(n); if (i >= 0) x.agents.splice(i, 1); else x.agents.push(n); b.setAttribute('aria-pressed', i < 0); });
     if (canOwner) $('#oadd').onclick = () => $('#olines').insertAdjacentHTML('beforeend', oline(null));
     if (canOwner) $('#olines').onclick = (e) => { const d = e.target.closest('[data-odel]'); if (!d) return; const ls = app.querySelectorAll('#olines .oline'); if (ls.length > 1) d.closest('.oline').remove(); else d.closest('.oline').querySelectorAll('input').forEach((i) => { i.value = ''; }); };
+    if ($('#e-import-ai')) $('#e-import-ai').onclick = async () => {
+      const t = $('#e-import-t'), r = $('#e-import-r'), b = $('#e-import-ai');
+      if (!t.value.trim()) { r.textContent = '先把房源文字粘贴到上面'; return; }
+      b.disabled = true; r.textContent = 'AI 正在整理，大概几秒钟…';
+      try { t.value = await window.StoreUtil.aiListing(t.value); $('#e-import-go').click(); r.textContent = 'AI 整理好了（上面是整理后的文字），' + r.textContent.replace(/^✓\s*/, ''); }
+      catch (e) { r.textContent = e.message; }
+      finally { b.disabled = false; }
+    };
     if ($('#e-import-go')) $('#e-import-go').onclick = () => {
       const known = [...COMMUNITIES, ...extra];
       const { x: y, got, miss } = window.StoreUtil.parseListingText($('#e-import-t').value, known, names);

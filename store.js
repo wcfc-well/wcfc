@@ -471,7 +471,17 @@
     if (x.note) got.push('备注');
     return { x, got, miss };
   };
-  window.StoreUtil = { listingText, parseListingText, commKey, findCommunity, shopKey, similarShops, involves, participants, people, STAFF, houseKey, unitKey, dealKey, dupDeal, DUP_DAYS };
+  // AI 整理房源文字（Cloudflare 免费 AI，经我们的中转）：返回整理好的“坐落：… 价格：…”文字
+  const aiListing = async (text) => {
+    if (!cfg.supabaseUrl) throw new Error('演示版没有接 AI');
+    let r; try { r = await fetch(cfg.supabaseUrl.replace(/\/$/, '') + '/ai/listing', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) }); }
+    catch (e) { throw new Error('连不上，检查一下网络'); }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 501 || r.status === 404) throw new Error('AI 还没开通（要在 Cloudflare 里加一下 AI 绑定）');
+    if (!r.ok || !j.text) throw new Error(/limit|quota|neuron|429/i.test(j.error || '') || r.status === 429 ? '今天的免费额度用完了，明天再用，或者先用上面的“识别”' : 'AI 没认出来，用上面的“识别”试试');
+    return j.text;
+  };
+  window.StoreUtil = { aiListing, listingText, parseListingText, commKey, findCommunity, shopKey, similarShops, involves, participants, people, STAFF, houseKey, unitKey, dealKey, dupDeal, DUP_DAYS };
 
   // 房源照片：手机选一张，压缩成大图（最长 1280）和小图（最长 320），都是 jpg
   function resizeTo(img, max, q) {

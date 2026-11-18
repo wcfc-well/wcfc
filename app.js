@@ -1255,7 +1255,7 @@
 房东：…
 维护：…
 备注：…"></textarea>
-          <button type="button" class="btn-primary" id="l-import-go">识别，填到下面</button><div id="l-import-r" class="small"></div></div></details>`}
+          <button type="button" class="btn-primary" id="l-import-go">识别，填到下面</button><button type="button" id="l-import-ai" style="margin-top:6px">写得太乱？用 AI 整理一下（免费）</button><div id="l-import-r" class="small"></div></div></details>`}
         ${x.needs_info ? `<div class="notice">这套是记账时自动建的，户型、面积这些还没填。房源维护人（${esc(x.agents.join('、') || '还没选')}）的后台会提示他们补全，谁先补完算谁的。你在这里直接填好保存也行。</div>`
           : x.filled_by ? `<div class="small muted">记账时自动建的，${esc(x.filled_by)} 补全了详细信息</div>` : ''}
         <div class="card stack" id="ph-box" style="gap:8px"></div>
@@ -1331,6 +1331,14 @@
       box.innerHTML = `<div class="small">${ok ? '✓ 已复制，去微信房源群里长按粘贴就行' : '手机不让自动复制，请长按下面的文字全选复制'}</div><textarea rows="9" readonly>${esc(t)}</textarea>`;
     };
     // 一键导入：把房源群里的文字认出来填进表格
+    if ($('#l-import-ai', sheet)) $('#l-import-ai', sheet).onclick = async () => {
+      const t = $('#l-import-t', sheet), r = $('#l-import-r', sheet), b = $('#l-import-ai', sheet);
+      if (!t.value.trim()) { r.textContent = '先把房源文字粘贴到上面'; return; }
+      b.disabled = true; r.textContent = 'AI 正在整理，大概几秒钟…';
+      try { t.value = await window.StoreUtil.aiListing(t.value); $('#l-import-go', sheet).click(); r.textContent = 'AI 整理好了（上面是整理后的文字），' + r.textContent.replace(/^✓\s*/, ''); }
+      catch (e) { r.textContent = e.message; }
+      finally { b.disabled = false; }
+    };
     if ($('#l-import-go', sheet)) $('#l-import-go', sheet).onclick = () => {
       const known = [...COMMUNITIES, ...extra];
       const { x: y, got, miss } = U.parseListingText($('#l-import-t', sheet).value, known, state.agents.filter((a) => a.active).map((a) => a.name));
